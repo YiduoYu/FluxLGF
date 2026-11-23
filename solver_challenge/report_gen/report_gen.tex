@@ -1,0 +1,77 @@
+\documentclass[11pt,a4paper]{ctexart}
+\usepackage[margin=2.2cm]{geometry}
+\usepackage{amsmath,amssymb,booktabs,float,graphicx,xcolor,hyperref,enumitem}
+\hypersetup{colorlinks=true,linkcolor=blue!50!black,urlcolor=blue!50!black}
+\setlist{itemsep=2pt,topsep=3pt}
+\title{H43：bt-v 能否泛化——在自建三温离散上的物理区间扫描}
+\author{温州肯恩大学 \quad Nonlinear Poisson 项目}
+\date{2026 年 11 月 4 日}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+我们自己写了三温方程的离散程序（1/8 靶丸、三层材料、向后 Euler + 系数冻结、格心有限体积 7 点格式），默认参数下与真实 SC26\_01 矩阵的系数特征和非零元数完全吻合，求解行为也一致（$128^3$ 上 BoomerAMG 21 步、bt-v 20 步，真实矩阵均为 23 步）。
+再用两个旋钮——辐射对电子的反馈强度 $F$、电子热传导强度 $G$——扫描 20 个物理区间。结论：
+(1) 整体 BoomerAMG 在所有区间都很稳健（15--19 步）；
+(2) bt-v 对\textbf{强反馈不敏感}（与我们的预测相反），但\textbf{电子导热一强就失效}（$G=1$ 时 91--92 步，$G=100$ 时不收敛）；
+(3) 推广版本修复了一部分：电子块改用 AMG 后 $G=100$ 恢复正常，两次扫描版本在所有区间都收敛；
+(4) 但在“电子导热与交换同样强”的中间区间（$G=1$），所有 bt 变体都比 BoomerAMG 慢 1.8--2 倍。
+20 个区间中有 16 个，最快的 bt 变体比 BoomerAMG 快（时间比 0.65--0.91）。6 条预测中 4 条成立。
+\end{abstract}
+
+\section{自建离散}
+\texttt{gen3t.py}，未知量为辐射能 $E$、电子温度 $T_e$、离子温度 $T_i$，线性化方程（每个单元，面系数取调和平均）：
+\begin{align*}
+c_1E-\nabla\!\cdot(k_1\nabla E)+eE-eT_e&=b_1,\\
+(c_2+w+f)T_e-\nabla\!\cdot(k_2\nabla T_e)-fE-wT_i&=b_2,\\
+(c_3+w)T_i-\nabla\!\cdot(k_3\nabla T_i)-wT_e&=b_3 .
+\end{align*}
+$c$ 为热容/时间步，$e=c\sigma\cdot4aT^3$ 为发射耦合，$f=c\sigma$ 为吸收耦合，$w$ 为电子--离子交换。三层（热核、冷密壳层、外部）的参数取自真实矩阵（报告 06 的表），对称面 Neumann、辐射远端面 Robin。
+两个旋钮：
+\begin{itemize}
+\item \textbf{辐射反馈 $F$}：$f=F(c_2+w)$。真实矩阵相当于 $F\approx2\times10^{-11}$；物理上光学厚、辐射主导时可接近 1。
+\item \textbf{电子导热 $G$}：$k_2=G(c_2+w+f)/6$，即电子块非对角部分与对角元之比约为 $G/(1+G)$。真实矩阵 $G\approx2\times10^{-4}$；热电子（Spitzer 导热）时可很大。
+\end{itemize}
+校准只在系数层面做（不求解）：默认参数下 $|a_{21}|/d_{22}$ 中位数 $2.0\times10^{-11}$、电子非对角占比 $2.0\times10^{-4}$，真实矩阵为 $1.6\times10^{-11}$、$2.1\times10^{-4}$；$128^3$ 时非零元数相同（52,133,888）。
+
+\section{方法与预测（运行前锁定）}
+方案 \texttt{protocol\_gen.md}，哈希 6b5996bc，2026-11-04T07:07:15Z。$m=64$（78.6 万未知量），$F\in\{2\times10^{-11},10^{-6},10^{-3},0.1,1\}$，$G\in\{2\times10^{-4},10^{-2},1,100\}$，另加 $m=128$ 默认参数作为保真检验。
+方法：整体 BoomerAMG（amg-3d）；bt-v；\textbf{bt-v2}（电子块用一次 AMG V 循环代替对角）；\textbf{bt-v2×2}（bt-v2 作为定常迭代用两次：$z=Pr;\ z\mathrel{+}=P(r-Az)$，把丢掉的反馈 $A_{21}$ 通过残差带回来）。
+全部 GMRES(50)、右预条件、$10^{-8}$、$x_0=0$、最多 500 步、单线程。单元测试已确认两种推广按设计工作。
+
+\section{结果}
+\begin{figure}[H]
+\centering
+\includegraphics[width=\linewidth]{regime.png}
+\caption{20 个区间（纵轴 $F$，横轴 $G$）的迭代数，以及最快 bt 变体与 BoomerAMG 的总时间比（蓝 = bt 更快，红 = BoomerAMG 更快）。“失败”为 GMRES 在第 50 步 breakdown。}
+\end{figure}
+保真检验（$m=128$，默认参数）：BoomerAMG 21 步 17.4\,s，bt-v 20 步 13.8\,s（0.79 倍），bt-v2 20 步 16.0\,s，bt-v2×2 14 步 18.2\,s。真实矩阵上为 23 步/23 步，时间比 0.66--0.87。自建离散在求解行为上也很好地代表了真实问题。
+
+\section{预测检验}
+\begin{enumerate}
+\item 保真：$m=128$ 时两种方法的迭代数在真实矩阵（23）的 $\pm30\%$ 以内：\textbf{成立}（21、20）。
+\item 弱反馈且电子导热弱的 4 个区间，bt-v 至少 3 个比 BoomerAMG 快：\textbf{成立}（4/4，时间比 0.82--0.88）。
+\item 反馈强（$F\ge0.1$）或电子导热强（$G\ge1$）的 14 个区间中，至少 11 个 bt-v 退化（迭代 $\ge1.5$ 倍或失败）：\textbf{不成立}（9/14）。
+强反馈本身不影响 bt-v（$F=1$ 时 16 步，比默认的 18 步还少），退化只来自电子导热。
+\item bt-v2 在 $F\le10^{-3}$ 的 12 个区间中至少 10 个迭代不超过 1.5 倍：\textbf{不成立}（9/12），$G=1$ 时仍要 50--59 步。
+\item bt-v2×2 在 $F\ge0.1$ 的 8 个区间全部收敛且迭代不超过 2 倍：\textbf{成立}（11--17 步，默认 12 步）。
+\item 20 个区间中至少 15 个最快 bt 变体比 BoomerAMG 快：\textbf{成立}（16/20；$F=0.1,G=1$ 基本持平 1.01）。
+\end{enumerate}
+
+\section{分析}
+\paragraph{为什么强反馈无害。}丢掉 $A_{21}$ 后，误差只沿“电子 $\to$ 辐射 $\to$ 电子”的回路传播，回路增益约为
+$\frac{e}{c_1+e+\cdots}\cdot\frac{f}{c_2+w+f+\cdots}$。第一个因子接近 1（辐射几乎完全由电子驱动），第二个因子在 $f$ 进入 $d_{22}$ 后最多是 $F/(1+F)\le 0.5$，
+所以回路增益始终小于 1，GMRES 轻松吸收。判断简化是否可用，应看\textbf{回路增益}，而不是单个耦合的大小。
+\paragraph{为什么电子导热是关键。}bt-v 把电子块当作对角阵，$G$ 大时这显然不成立（$G=100$ 时 breakdown）。bt-v2 用 AMG 解电子块，解决了 $G=100$，但离子 Schur 补 $S_3=A_{33}-A_{32}D_{22}^{-1}A_{23}$ 仍用对角 $D_{22}$。
+在壳层里交换 $w$ 很强，$G=1$ 时 $A_{22}^{-1}$ 与 $D_{22}^{-1}$ 相差约一倍，$S_3$ 的近似误差最大，于是 50--59 步；$G=100$ 时交换相对扩散很弱，误差反而变小。
+所以真正困难的是“\textbf{电子--离子强交换 + 中等电子导热}”：此时电子和离子必须作为一个耦合的 $2\times2$ 系统一起求解。
+\paragraph{整体 BoomerAMG 的稳健性。}它在全部 20 个区间都是 15--19 步，不需要任何物理判断。bt 系列的优势只在每步更便宜（快 10\%--35\%），而迭代数并不更少（bt-v2×2 迭代少，但每步贵一倍）。
+
+\section{结论}
+\begin{itemize}
+\item bt-v 的适用条件可以精确表述为：\textbf{电子块对角占优}（$G\lesssim10^{-2}$），对辐射反馈强弱不敏感。SC26\_01 正好满足。
+\item 推广方向是明确的：电子导热强时用 bt-v2；最难的中间区间需要把电子与离子耦合求解，例如对 $[T_e,T_i]$ 用 nodal/system AMG 或 PCTL 式的两层法，再解辐射。这是下一步可以测试的方法。
+\item 文献中的块预条件（Yue 等）报告比 AMG 快 5.5 倍；在我们的扫描里，bt 系列最多快约 1.5 倍（时间比 0.65）。这可能与他们的子块用更精确的内层求解、以及问题本身不同有关，目前无法直接比较。
+\end{itemize}
+\end{document}

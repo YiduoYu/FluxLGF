@@ -1,0 +1,92 @@
+\documentclass[11pt,a4paper]{ctexart}
+\usepackage[margin=2.1cm]{geometry}
+\usepackage{amsmath,amssymb,booktabs,float,graphicx,xcolor,hyperref,enumitem}
+\hypersetup{colorlinks=true,linkcolor=blue!50!black,urlcolor=blue!50!black}
+\setlist{itemsep=2pt,topsep=3pt}
+\title{H54 探索：降低 bt-fd 特征区直接解的成本（多区域背景）}
+\author{温州肯恩大学 \quad Nonlinear Poisson 项目}
+\date{2026 年 11 月 5 日}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+H53 中 bt-fd 唯一输给 BoomerAMG 的情形是特征区大（7.7\%、9.2\%），直接解的 setup 达到 12.5--16.9\,s。本报告尝试用“多区域背景”降低这部分成本：
+把每个标量块中系数为常数的大区域都识别出来，各自用快速对角化精确求逆，直接解只留给区域之间的界面。全部为\textbf{探索性}结果，没有锁定，也没有给出新的推荐方法。
+\textbf{(1) 覆盖率很高：}三个常系数大区域覆盖真实矩阵 97.4--97.6\% 的单元、自建矩阵 99.0--99.3\%，界面只占 0.7--2.6\%。
+\textbf{(2) 但“孤岛”区域不能这样处理：}被低导层包围的区域（热核）的常数模态有约 99\% 经界面流失，用区域自身系数构造的快速求逆会把这个模态的幅度估错约 100 倍，收敛在 $10^{-8}$ 附近停滞（56--59 步）；整立方体或包围盒上的快速求逆都一样。
+\textbf{(3) 孤岛留在直接解里、其余区域用背景（规则 open）：}厚壳 30/70 从 bt-fd 的 22.3/24.3\,s 降到 8.1/11.4\,s，\textbf{由输 1.8 倍变为 BoomerAMG 的 0.64/0.68 倍}；但大热核 60/66 没有收益（热核本身 5.4\%），基准几何略慢，
+真实矩阵上辐射块的热核因为系数是渐变过渡、没有被识别为孤岛，结果在 $10^{-8}$ 停滞。所以这个版本还不够稳健，不能替代 bt-fd。
+\end{abstract}
+
+\section{方法}
+在 bt-fd（报告 18、19）中，每个标量块 $M$ 只有一个常系数背景。多区域版本（\texttt{rsolve.MultiFDLGF}）：
+\begin{enumerate}
+\item 单元的 6 个面系数相差不超过 $10^{-6}$ 时称为均匀单元；均匀单元的 6 连通分量中，大于 $m^3/1000$ 的作为区域。每个区域 $k$ 拟合自己的常数 $\kappa_k$（面系数中位数）、$r_k$（反应项中位数）、$\beta_k$（远端 Robin）。
+\item 与所属区域的常系数行一致（误差 $\le10^{-6}$ 行最大元）的单元作为背景，其余单元外扩 2 层作为特征区 $F$（直接 LU）。
+\item 背景求逆 $z_C=\sum_k \mathbb 1_k\,G_k(\mathbb 1_k w)$，$G_k$ 为第 $k$ 个区域常数的快速对角化逆；其余同 bt-fd 的无抵消平衡形式（线性缺陷 $\le10^{-16}$）。
+\item 哪些区域用背景求逆（admit 规则）：all（全部）、big（最大区域 + 大于 2\% 的区域）、local（最大区域 + 反应占优区域）、
+open（最大区域 + 非孤岛区域；孤岛 = 区域外紧邻单元的最弱面系数中位数 $<0.1\kappa_k$）、box（全部区域，各自在包围盒上做快速对角化）。
+\end{enumerate}
+
+\section{结果}
+\paragraph{覆盖率（面系数相差 $\le10^{-6}$）。}真实 $S_3$：三个区域 95.41\%、1.81\%、0.41\%，其余 2.37\%；真实 $A_{11}$：95.19\%、1.90\%、0.35\%，其余 2.56\%；
+自建 30/70：90.85\%、7.74\%、0.67\%，其余 0.74\%；自建 60/66：92.30\%、5.36\%、1.32\%，其余 1.02\%。（原 bt-fd 的特征区：4.6\%、9.2\%、7.7\%。）
+
+\begin{table}[H]
+\centering\footnotesize
+\begin{tabular}{llrrr}
+\toprule
+自建 $m=64$ & 规则 & 特征区 $S_3$ / $A_{11}$（含外扩） & $10^{-4}$ & $10^{-8}$ \\
+\midrule
+厚壳 30/70 & all & 6.4\% / 4.6\% & 11 步 & 16 步 \\
+ & big & 6.9\% / 5.0\% & 7 & 11 \\
+ & box & 6.4\% / 4.6\% & 9 & \textbf{56} \\
+ & open & 6.9\% / 5.0\% & 7 & 11 \\
+基准 43/54 & all & 3.8\% / 3.8\% & 12 & \textbf{59} \\
+ & big & 5.5\% / 5.5\% & 5 & 8 \\
+ & box & 3.8\% / 3.8\% & 9 & \textbf{56} \\
+ & open & 5.3\% / 5.3\% & 8 & 11 \\
+大热核 60/66 & all / big & 5.0\% / 5.0\% & 9 & \textbf{59} \\
+ & box & 5.0\% / 5.0\% & 7 & \textbf{57} \\
+ & open & 9.5\% / 9.5\% & 5 & 9 \\
+\midrule
+（参照）bt-fd 单背景 & & 约 5.5--9.8\% & 5--6 & 8--10 \\
+\bottomrule
+\end{tabular}
+\caption{凡是把热核（孤岛）交给背景求逆的规则，到 $10^{-8}$ 都停滞（加粗）。只有 open 在三个几何上都稳定。}
+\end{table}
+
+\begin{table}[H]
+\centering\footnotesize
+\begin{tabular}{lrrr}
+\toprule
+$m=128$（总时间，$10^{-4}$ / $10^{-8}$） & BoomerAMG & bt-fd（H53） & 多区域 open \\
+\midrule
+厚壳 30/70 & 12.6 / 16.7\,s & 22.3 / 24.3\,s（setup 17.2） & \textbf{8.1 / 11.4\,s}（setup 3.4） \\
+大热核 60/66 & 16.0 / 20.5 & 18.7 / 22.2（13.2） & 17.6 / 23.7（10.0） \\
+基准 43/54 & 14.1 / 17.9 & \textbf{8.3 / 9.5}（5.7） & 9.0 / 11.7（4.0） \\
+真实 SC26\_01 & 15.4 / 20.3 & \textbf{9.1 / 13.1}（6.3） & 10.5 / 55.9（56 步） \\
+\bottomrule
+\end{tabular}
+\caption{同一批次（探索性，单遍）。}
+\end{table}
+
+\section{发现}
+\begin{enumerate}
+\item \textbf{孤岛是根本难点。}热核被低导层包围，近似 Neumann 孤岛；它的常数模态在真实算子中约 99\% 通过界面流失，而任何只用区域自身系数的快速求逆都把这个模态当作只靠反应项衰减，幅度偏大约 100 倍。
+整立方体（体积比约 1/50）或包围盒（约 1/2）上的求逆都改变不了这一点。这与 Vuik 等的结论一致：高对比度孤岛需要单独的粗空间（常数向量）处理。
+\item \textbf{非孤岛的常系数区域可以安全地交给背景求逆。}夹在两个高导区之间的低导壳层（Dirichlet 型边界）用整立方体快速求逆没有问题；厚壳 30/70 因此从输 1.8 倍变成快 1.5 倍。
+\item \textbf{孤岛识别不能只看紧邻一层。}真实矩阵中辐射系数从热核到壳层是渐变的，紧邻热核的单元面系数仍然较大，open 规则没有把辐射热核识别为孤岛，导致停滞。
+\end{enumerate}
+
+\section{下一步建议}
+\begin{itemize}
+\item \textbf{孤岛粗空间：}把孤岛交给背景求逆，同时把孤岛的指示向量加入平衡形式的精确部分（$W=[I_F,\ z_{\text{island}}]$，只多一个未知量）。
+这样孤岛的常数模态由 Galerkin 精确确定，其余模态由快速求逆处理，热核也不再需要直接解。难点是 $z^TMz$ 涉及热核行的抵消（对角 $10^{17}$），需要用双双精度行和计算。
+\item \textbf{孤岛识别改为代数判据：}用区域常数模态的“泄漏比”（报告 18 的可行性分析中热核为 0.99）判断，而不是看紧邻一层的面系数。
+\item 在这两点解决之前，bt-fd（单背景，H53）仍是推荐方法；多区域版本只对“厚低导壳层”这类情形有明确收益。
+\end{itemize}
+
+\paragraph{文件。}\sloppy \texttt{FD\_LGF/regions/rsolve.py}（\texttt{MultiFDLGF}、\texttt{FDMBox}；bt-fd 默认仍用单背景 \texttt{ScalarFDLGF}，H53 的代码路径未改变）、\texttt{homog.py}、\texttt{explore\_multi.py}、\texttt{explore\_admit.py}；结果 \texttt{results/explore\_*}。
+\end{document}

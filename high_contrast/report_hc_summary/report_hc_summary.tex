@@ -1,0 +1,265 @@
+\documentclass[11pt,a4paper]{ctexart}
+\usepackage[margin=2.1cm]{geometry}
+\usepackage{amsmath,amssymb,booktabs,float,graphicx,xcolor,adjustbox,longtable,hyperref,enumitem,array}
+\usepackage{placeins}
+\hypersetup{colorlinks=true,linkcolor=blue!50!black,urlcolor=blue!50!black}
+\setlist{itemsep=2pt,topsep=3pt}
+\title{高对比度问题的求解器：\\目前的方法、适用场景和实验数据}
+\author{温州肯恩大学 \quad Nonlinear Poisson 项目}
+\date{2026 年 11 月 11 日}
+
+\begin{document}
+\maketitle
+\sloppy
+
+\begin{abstract}
+本文汇总 11 月 3 日到 11 月 9 日为高对比度问题做的四个求解器：FD-LGF、bt-fd、FluxMG 和 SSR，写清每个方法的原理、适合的场景和已有的实验数据，最后给出我目前的判断和下一步。附录 A--E 用表格列出全部实验数据。本文没有新实验，数据全部取自已有的结果文件（见第~\ref{sec:files} 节）。
+
+\textbf{主要判断。}(1) 标量系数、通量差分的高对比度问题（M 矩阵）上，BoomerAMG 的迭代数很稳定，$\chi$ 到 $10^8$ 都只要 7--13 次。要胜过它，只能靠利用问题结构降低每步和构建的成本，不能指望更好的鲁棒性。
+(2) 没有一个方法在所有场景都最好，所以打算做成按矩阵结构选择的组合：背景可分离用 FD-LGF（三维 $\chi^x$ 上约为 BoomerAMG 的 0.04 倍）；三温问题且特征区小用 bt-fd（SC26\_01 上约 0.5 倍）；张量网格上的多场和极端对比用 FluxMG（留出集对 BoomerAMG 最优设置 9/10 获胜，真实矩阵 0.80 倍）；张量网格单场用 hypre PFMG（比 FluxMG 快 1.8--3.4 倍）；其余情况仍用 BoomerAMG。
+(3) 这套选择规则只有部分阈值有数据支持，还没有作为整体验证。所有结果都是单线程，除 SC26\_01 外都是我们自己生成的矩阵。
+\end{abstract}
+
+\tableofcontents
+
+\section{“高对比度”在本项目中的三种含义}
+\begin{enumerate}
+\item \textbf{系数跨度大。}$-\nabla\cdot(a\nabla u)+qu=f$，教授指定的主算例是 $a=a_0\chi^x$，对比度恰好是 $\chi$；补充算例有夹杂、通道、绝缘墙、对数正态场、渗流两相等，统一写成 $a=\chi^{g}$，$g\in[0,1]$，$\chi\le10^8$。
+\item \textbf{极端量级加多场耦合。}三温辐射扩散（3T），如 SC26\_01：离子导热跨过冷密壳层下降约 $10^{19.6}$ 倍，壳层内三个温度之间的交换系数比别处大 $10^3$--$10^{19}$ 倍，矩阵中有 $10^{17}$ 量级的元素。普通的“对角元减非对角元之和”会严重相消，热核形成近乎奇异的孤岛。
+\item \textbf{多群耦合。}多群扩散的群间耦合强弱差别很大，选错哪些场一起解，迭代数可以从 23 变成 121。我们的多群算例只是类比 Yue 等 2026 的难易程度，不是他们的矩阵。
+\end{enumerate}
+三类问题上 BoomerAMG 的弱点不同：第 1 类上迭代数稳定，弱点是三维构建成本（$n=127$ 时 setup 5--8\,s）；第 2、3 类上，它把多场当成一个标量矩阵处理，迭代数和成本都更高，难的多群算例要 100--300 次。
+
+\section{一页结论：场景与推荐方法}\label{sec:choice}
+\begin{table}[H]
+\centering\small
+\renewcommand{\arraystretch}{1.25}
+\begin{tabular}{>{\raggedright}p{4.3cm}>{\raggedright}p{2.2cm}>{\raggedright}p{4.4cm}>{\raggedright\arraybackslash}p{4.3cm}}
+\toprule
+场景 & 推荐 & 实测（对 BoomerAMG） & 不适用 / 尚缺证据 \\
+\midrule
+笛卡尔网格，背景可分离或分层（$\chi^x$、阶跃层、薄层），特征体积小 & FD-LGF & 三维 $\chi^x$，$n=127$：0.04 倍，迭代 2--3 次；三维薄层 25--40 倍更快 & 不可分离系数退化为直接法，慢 1.8--14 倍；未与 PFMG 比较 \\
+三温，单一背景占主导，特征区 $\lesssim10\%$ & bt-fd（Cholesky） & SC26\_01：0.51 倍；特征区 4.7--9.1\% 的序列 0.53--0.73 倍（对调参后的 BoomerAMG） & 特征区 16--20\% 时 1.03--1.35 倍，输；并行未测 \\
+张量网格 7 点，多场（3T 多夹杂、多群），极端对比 & FluxMG & 留出集 9/10 获胜，SCORE $+0.65$；SC26\_01 0.80 倍（对 BoomerAMG 最优设置） & 多群易例 1.59 倍；对齐各向异性 1.15--1.22 倍；非张量网格不支持 \\
+张量网格，单场，一般高对比度（随机场、管道、绝缘板、渗流） & hypre PFMG（红黑） & 比 FluxMG 快 1.9--3.0 倍，约为 BoomerAMG 的 0.3--0.4 倍 & 3T 胶囊类和 SC26\_01 上失败 \\
+非结构网格、一般稀疏矩阵 & BoomerAMG & -- & SSR 在高对比度标量上 0.95--1.18 倍，不推荐 \\
+\bottomrule
+\end{tabular}
+\caption{各场景的推荐方法。比值小于 1 表示比 BoomerAMG 快。不同行的数据来自不同实验，判据不同，见各节。}
+\end{table}
+
+\section{FD-LGF：可分离背景的精确逆加局部精确解}
+\subsection{方法}
+FD-LGF 是 Fictitious-Domain Lattice Green's Function 预条件。把系数分解为
+\[
+  a(x,y)=b(x,y)\,\phi(x,y),\qquad b=a_1(x)\,a_2(y),\qquad \phi\ne1\ \text{只在特征（夹杂、通道、墙）内}.
+\]
+\begin{itemize}
+\item \textbf{背景逆 $G=B^{-1}$。}$b$ 可分离时，通量算子可写成 $BU=D_2UT_x+T_yUD_1$，用快速对角化（Lynch--Rice--Thomas 1964）精确求逆。$a_2$ 为常数时 $y$ 方向用 DST-I，复杂度 $O(n^2\log n)$；两个方向都变化时用稠密形式，二维每次 $O(n^3)$。
+\item \textbf{局部精确解 $Q$。}特征集 $\{|\log a-\log b|>\log2\}$ 外扩宽度 $w$ 的环，按连通分量分块做稀疏 LU，$Q=\sum_kR_k^{\mathsf T}A_k^{-1}R_k$。必须精确：换成 V-cycle 或 Chebyshev 后迭代升到 25--540 次。
+\item \textbf{平衡组合。}$P=Q+(I-QA)\,G\,(I-AQ)$，对称正定，直接用于 PCG。
+\end{itemize}
+$G$ 对背景精确、$A_k^{-1}$ 对局部精确，两者都不随 $\chi$ 变差，所以迭代数与 $\chi$ 无关；环宽按物理长度固定时也与 $n$ 无关。
+
+\subsection{适用场景}
+笛卡尔网格，背景（近似）可分离或分层，特征体积小。典型例子是教授的 $\chi^x$、分层储层加少量夹杂或断层、三维层状复合材料。特征体积占大部分时，$Q$ 就是一次整体 LU，退化为稀疏直接法，不应使用。
+
+\subsection{实验数据}
+判据：PCG，$\|r\|/\|f\|\le10^{-10}$，单线程，3 次取中位数；BoomerAMG 为 PETSc 默认参数（三维另测 $\theta=0.25,0.5$）。离散 MMS，所有收敛方法得到同一个离散解。
+
+\begin{table}[H]
+\centering\small
+\begin{tabular}{llrrrr}
+\toprule
+算例（$\chi=10^8$） & $n$ & 传统 LGF & GMG & BoomerAMG & FD-LGF \\
+\midrule
+二维 A：$\chi^x$ & 1023 & 46.30 & 0.90 & 1.14 & \textbf{0.25} \\
+二维 B：阶跃层 & 1023 & 3.04 & 0.94 & 1.35 & \textbf{0.20} \\
+二维 C：$\chi^x$+规则夹杂 & 1023 & 38.69 & 8.20 & \textbf{1.53} & 2.26 \\
+二维 D：$\chi^x$+随机夹杂 & 1023 & 37.92 & 9.33 & \textbf{1.62} & 2.72 \\
+\midrule
+三维 A：$\chi^x$ & 127 & 47.96 & 2.62 & 8.86 & \textbf{0.34} \\
+三维 B：阶跃层 & 127 & 5.14 & 2.28 & 12.80 & \textbf{0.23} \\
+三维 C：$\chi^x$+规则夹杂 & 127 & 44.08 & 13.50 & 10.09 & \textbf{9.25} \\
+三维 D：$\chi^x$+随机夹杂 & 127 & 43.00 & 19.73 & 11.66 & \textbf{6.01} \\
+\bottomrule
+\end{tabular}
+\caption{教授的 $\chi^x$ 系列，总时间（s，setup+solve）。夹杂算例的 FD-LGF 取环宽 $w=1/64$ 的结果。迭代数：A、B 上 FD-LGF 1--3 次，与 $\chi$、$n$ 无关；传统 LGF 在 $\chi\ge10^4$ 时不收敛；三维 BoomerAMG 在夹杂算例上随 $n$ 从 11 增到 17 次，FD-LGF 为 10--16 次。数据：\texttt{FD\_LGF/report/tables\_2d.tex, tables\_3d.tex}。}
+\end{table}
+
+\begin{figure}[H]\centering
+\includegraphics[width=0.62\textwidth]{fig_fdlgf.pdf}
+\caption{三维 $\chi^x$（$\chi=10^8$）的总时间随网格的变化。FD-LGF 在 $n=127$（约 $2\times10^6$ 未知量）时为 BoomerAMG 的 0.04 倍。}
+\end{figure}
+
+\begin{table}[H]
+\centering\small
+\footnotesize\setlength{\tabcolsep}{4pt}
+\begin{tabular}{lrrrl}
+\toprule
+系数（二维 $n=1023$，4 个 $\chi$） & AMG 迭代 & FD-LGF 迭代 & 时间比 & 局部区域比例 \\
+\midrule
+sep2 两方向可分离 & 8--9 & 3--4 & 0.9--1.1 & 0 \\
+walls 绝缘墙 & 10--11 & 9--14 & 1.1--1.2 & 0.24--0.64 \\
+chan 通道 & 12--13 & 9--25 & 1.4--2.1 & 0.26--0.65 \\
+\begin{tabular}[t]{@{}l@{}}其余 7 类（checker、diag、layered、\\ lognorm、perc、diagfine、rough）\end{tabular} & 8--13 & 1--28 & 1.8--14 & 0.20--1.00 \\
+\midrule
+三维 sheets 薄层（$n=127$） & 9--11 & 2--3 & 0.02--0.04 & -- \\
+三维 tubes 管道（$n=127$，$w=1/64$） & 10--12 & 7--17 & 约 0.5 & -- \\
+三维 insul 绝缘板（$n=127$） & 8--12 & 8--9 & 9--100 & 贯穿全域 \\
+\midrule
+\multicolumn{5}{l}{时间比 = FD-LGF / BoomerAMG 总时间}\\
+\bottomrule
+\end{tabular}
+\caption{更一般的 10 类二维系数和 5 类三维系数（报告 01 的确认实验，方案锁定 \texttt{c2ff7672}）。BoomerAMG 在所有情形下都没有迭代失败。数据：\texttt{FD\_LGF/high\_contrast/report\_hc/}。}
+\end{table}
+
+\paragraph{精度提醒。}按残差停止时，FD-LGF 在低系数区的代数误差比 BoomerAMG 大 1--4 个数量级（棋盘上可到 $10^{-4}$），残差判据看不到低系数区的误差。比较时要么收紧容差，要么按误差计数。
+
+\section{bt-fd：三温问题的块三角加 FD-LGF}
+\subsection{方法}
+针对 SC26\_01 这类三温矩阵：在真实解上，$T_1$ 对 $T_2$ 方程的反馈只占 $10^{-12}$，电子块的非对角部分只占 $2\times10^{-8}$，所以 $3\times3$ 系统可以化为“两个标量扩散方程加一次对角消元”。
+\begin{itemize}
+\item \textbf{bt}：消去电子方程，按块三角顺序解剩下的两个标量块；
+\item \textbf{fd}：每个标量块用 FD-LGF 的思路，常系数背景用快速变换，冷密壳层等特征区用直接解（LU 或 Cholesky）；
+\item 外层用双双精度残差做混合精度迭代修正，2--3 步达到 $\|b-Ax\|/\|b\|<10^{-8}$。
+\end{itemize}
+
+\subsection{适用场景}
+三温或类似的少数场耦合问题，单一常系数背景占主导，特征区体积小。文献调研（报告 25）的结论是“bt”部分是三温问题的主流结构，应保留；“fd”部分只适合这类矩阵，不作为通用方法。
+
+\subsection{实验数据}
+判据：双双精度原残差 $<10^{-8}$，时间含构建，单线程，独立进程。方案锁定（H57，sha256 \texttt{82dbdb84}），76 次运行全部达标。
+\begin{table}[H]
+\centering\small
+\footnotesize\setlength{\tabcolsep}{4pt}
+\begin{tabular}{lrrrrr}
+\toprule
+& 特征区 & BoomerAMG 调参 & bt-v（内含 AMG） & bt-fd Cholesky & Cholesky/调参 \\
+\midrule
+真实 SC26\_01（5 轮中位数） & -- & 31.86 & 29.80 & \textbf{16.78} & 0.53 \\
+G1 球（10 步） & 4.7\% & 220.2 & 208.7 & \textbf{117.2} & 0.53 \\
+G4 长椭球 & 9.1\% & 219.0 & 199.0 & \textbf{141.8} & 0.65 \\
+G7 3 胶囊 & 6.6\% & 215.0 & 225.7 & \textbf{156.8} & 0.73 \\
+G9 10 胶囊 & 16.3\% & 204.7 & \textbf{189.6} & 210.2 & 1.03 \\
+G8 10 胶囊 & 18.4\% & 209.7 & \textbf{194.0} & 283.5 & 1.35 \\
+G10 10 扁方块 & 20.3\% & 207.8 & \textbf{188.4} & 257.7 & 1.24 \\
+\bottomrule
+\end{tabular}
+\caption{时间（s）。G 序列为 $m=128$、每个 10 个时间步的自建三温序列（真实矩阵只有一个时间步）。对未调参的基线 BoomerAMG，SC26\_01 上 bt-fd Cholesky 的配对比值为 0.51。数据：\texttt{FD\_LGF/regions/report/report\_h57.tex}。}
+\end{table}
+特征区在 4.7--9.1\% 时 bt-fd 胜，16.3--20.3\% 时输，中间没有数据，所以“$\lesssim10\%$”这个阈值只是暂定。
+
+\section{FluxMG：通量形式的结构多重网格}
+\subsection{方法}
+\begin{itemize}
+\item \textbf{算子只存通量。}每个场每个单元存面传导系数 $k$ 和行余量 $C$（双双精度累加得到），不存对角元：
+$(Ax)_{f,i}=\sum_g C_{fg,i}\,x_{g,i}+\sum_{\text{面}}k_f(x_{f,i}-x_{f,\mathrm{nb}})$。先求差再乘，$10^{17}$ 的元素不会相消。
+\item \textbf{层次。}$2\times2\times2$ 分片常数聚合，粗层面系数是跨盒子边界的细面系数之和，每层仍是 7 点格式；某方向明显偏弱时不粗化该方向（半粗化）。构建基本只有加法。
+\item \textbf{循环。}K-cycle（Notay，两步 GCR），块红黑光滑，只在连续 4 个以上各向异性单元的线段上做线消元（GTH 形式，只用加法）。
+\item \textbf{区域向量。}每层把扩散占优的相连单元分成区域，每个区域一个常数向量，经静态消元延伸到相邻单元，小矩阵 $E=W^{\mathsf T}AW$ 按差分精确计算后用 GTH 消元。这一步专门处理孤岛和近乎奇异的高导区域。
+\item \textbf{多场缩减。}可由对角解的场先消去，其余按常数模态的回路增益分组，块三角顺序求解，每组一个 Core 循环；再用一个探针：在聚合到 $8^3$ 盒子的系统上测块三角求解的收缩因子，超过 0.7 就把所有耦合场并成一组。
+\end{itemize}
+全程不用 AMG，只需要张量网格上的 7 点 M 矩阵系统。
+
+\subsection{适用场景}
+张量网格上的多场问题（三温多夹杂、多群），以及系数量级极端、普通存储会相消的问题。单场问题上它能胜过 BoomerAMG，但这个优势来自结构网格本身，hypre 的结构多重网格 PFMG 更快（见下）。
+
+\subsection{实验数据}
+判据：双双精度原残差 $<10^{-8}$，时间含构建，单线程。对照组有两个：BoomerAMG 在 8 组标量设置加 sys.u/sys.n（多场的 systems 设置）中每个算例取最快的一个；hypre PFMG、PFMG 红黑、SMG 中取最快的一个（预注册比较，2 次打乱顺序的重复）。
+\begin{figure}[H]\centering
+\includegraphics[width=0.86\textwidth]{fig_fluxmg.pdf}
+\caption{测试集 19 个算例加真实矩阵，时间对 BoomerAMG 最优设置的比值。上面 7 个是单场（Poisson、各向异性、高对比度），中间 9 个是三温，再下面 3 个是多群，最下面是真实矩阵。数据：\texttt{fluxmg/structured/results\_20261109.jsonl}、\texttt{fluxmg/amg\_configs.jsonl}。}
+\end{figure}
+
+\begin{table}[H]
+\centering\small
+\begin{tabular}{lrrl}
+\toprule
+算例集 & 对 BoomerAMG 最优设置 & 对 PFMG/SMG 最优 & 说明 \\
+\midrule
+测试集（19） & $+0.43$，14/19 胜 & $+0.22$，8/19 胜 & 循环中使用过 \\
+留出集（10） & $+0.65$，9/10 胜 & $+1.72$，9/10 胜 & 循环中从未运行 \\
+多群分组留出（14） & $+0.57$，11/14 胜 & $+0.60$，9/14 胜 & 分组规则实现前固定 \\
+真实 SC26\_01 & 0.80 倍 & PFMG/SMG 全部失败 & 59 次 vs 34 次 \\
+\bottomrule
+\end{tabular}
+\caption{SCORE 为 $-\mathrm{mean}\log_2(t_\text{FluxMG}/t_\text{对照})$，越大越好，失败按 8 倍计；$+0.43$ 约相当于平均快 1.35 倍。}
+\end{table}
+
+\paragraph{各类问题上的情况。}
+\begin{itemize}
+\item \textbf{单场高对比度}（lognorm3、tubes、insul、perc3，$64^3$）：FluxMG 0.39--0.72\,s，BoomerAMG 最优设置 0.60--0.71\,s，PFMG 红黑 0.20--0.24\,s。FluxMG 对 BoomerAMG 为 0.65--1.02 倍，但 PFMG 又比 FluxMG 快 1.9--3.0 倍。
+\item \textbf{三温}：FluxMG 对 BoomerAMG 为 0.47--0.86 倍（10 渐变扁方块 1.07 倍是唯一输的）；PFMG/SMG 在胶囊类、$m=128$ 和真实矩阵上全部失败，这是 FluxMG 区域向量起作用的地方。
+\item \textbf{多群}：难例 0.29--0.53 倍；易例 1.59 倍（对 sys.n），中例 1.04 倍。
+\item \textbf{对齐各向异性}（强方向 100、1000）：1.15--1.22 倍。
+\item 真实矩阵上 FluxMG 约 23\,s，bt-fd Cholesky 约 16.8\,s（另一批运行，判据相同），所以在小特征区的三温问题上 bt-fd 仍然更好。
+\end{itemize}
+
+\paragraph{成本。}构建是主要开销，其中 \texttt{build\_regions}/\texttt{assemble\_regions} 约占 60\%；但区域向量只对三温有用，而且三温在最细层和粗层都需要。试过用粗层反应项的非 Galerkin 占比、单区域判据、探针来决定是否建区域向量，都分不开（第 31 轮）。预先算好 $H=AW$、$G=A^{\mathsf T}W$ 让 Poisson 的预条件从 8.6 降到 6.2\,ms，测试集上没有收益（第 33 轮）。
+
+\section{SSR：纯代数的采样 Schur 约化（作为对照）}
+SSR 只读 CSR 矩阵：每层对独立集精确消元，用随机采样（对称时链采样，非对称时循环运输方案）代替 Schur 补的填充，再做 GTH 余量更新和同号合并。它是为“比 BoomerAMG 更通用”设计的，不是专门的高对比度方法，放在这里是为了说明纯代数路线在高对比度上的表现。
+\begin{table}[H]
+\centering\small
+\begin{tabular}{lrrr}
+\toprule
+算例 & SSR 迭代/时间 & BoomerAMG \texttt{fast.25} & SSR/AMG \\
+\midrule
+lognorm3 & 25 / 0.66\,s & 19 / 0.56\,s & 1.18 \\
+tubes & 35 / 0.78\,s & 20 / 0.66\,s & 1.18 \\
+perc3 & 27 / 0.65\,s & 19 / 0.68\,s & 0.95 \\
+insul（留出） & 26 / 0.65\,s & 19 / 0.60\,s & 1.09 \\
+3T（3 例） & 25--46 & 30 & 1.12--1.64 \\
+多群难例 & 22 / 0.47\,s & 109 / 2.36\,s & 0.20 \\
+\bottomrule
+\end{tabular}
+\caption{锁定版本 G（\texttt{gensolver/round3/final\_dev\_G.log}、\texttt{final\_holdout\_G.log}）。}
+\end{table}
+高对比度标量和三温上 SSR 略慢于 BoomerAMG，只在多群、图和对流类问题上明显更快。另外一个教训：按 $\sqrt{d_id_j}$ 判据丢弃小元素会破坏高对比度界面，这条路已放弃。
+
+\section{我目前的判断和下一步}\label{sec:next}
+\subsection{判断}
+\begin{enumerate}
+\item \textbf{要赢靠结构，不靠鲁棒性。}在 M 矩阵的高对比度问题上，BoomerAMG 迭代数从来不是问题（报告 01 没有找到它迭代失败的例子）。我们几个方法的收益都来自利用结构：FD-LGF 利用可分离背景，bt-fd 利用三温的弱反馈，FluxMG 和 PFMG 利用张量网格。
+\item \textbf{应当做组合，而且选择规则必须只看矩阵。}可以从矩阵算出的判别量有：场的个数和耦合强度（FluxMG 的分组探针已经实现）、是否张量网格 7 点格式、背景的可分离程度（对 $\log a$ 做可分离拟合的残差）、特征区体积分数。暂定的规则就是第~\ref{sec:choice} 节的表。
+\item \textbf{FluxMG 的价值在多场和极端对比，不在单场。}11 月 9 日的预注册比较里预测 P5（“FluxMG 在 70\% 以上的测试和留出算例上快于最好的结构多重网格”）不成立（59\%）。单场问题应直接交给 PFMG。
+\item \textbf{高对比度要看真实误差。}残差判据会掩盖低系数区的误差（FD-LGF 上差 1--4 个数量级），三温上的自报残差也不等于真实精度。以后的比较统一用双双精度原残差，必要时再加误差判据。
+\end{enumerate}
+
+\subsection{正在做和准备做的事（均未验证）}
+\begin{enumerate}
+\item \textbf{FluxMG 的算子相关插值。}工作目录里的 \texttt{flux\_mg.py} 已加入几种选项：沿粗化方向的算子相关线性插值（串联电阻形式）、转置限制、粗层面系数按粗化比缩放或按串联方式计算（Kwak；Khalil--Wesseling；Alcouffe 等 1981）。这些还没有跑评测，\texttt{best/} 没有改动。目标是渐变过渡和 10 渐变扁方块（67 次）这类慢收敛算例。
+\item \textbf{降低区域向量的构建成本}，或者找到一个只看矩阵就能决定是否需要区域向量的判据。
+\item \textbf{弄清单场上 FluxMG 为什么比 PFMG 慢 2--3 倍。}猜测是 K-cycle 的 GCR、区域向量和仍在 Python 中的构建带来的开销，需要逐层计时。
+\item \textbf{补齐对照}：FD-LGF 的 $\chi^x$ 和 10 类系数上没有和 PFMG 比过；bt-fd 和 FluxMG 之间的特征区阈值（10\%--16\% 之间）没有数据。
+\item \textbf{并行测试。}全部结果都是单线程。红黑光滑和结构化存储应当利于并行，但这只是预期；“是否真正胜过 BoomerAMG”最终取决于这一步。
+\item \textbf{更大网格}（$m=256$）的时间和内存，以及时间序列复用（真实矩阵只有一个时间步，只能用生成器）。
+\end{enumerate}
+
+\section{实验条件和注意事项}
+\begin{itemize}
+\item 全部单线程（\texttt{OMP\_NUM\_THREADS=1}），在开着其他程序的桌面机上运行；同一代码的 FluxMG SCORE 在 0.43--0.56 之间波动，所以只比较同批或配对的结果。
+\item 除 SC26\_01 外，所有矩阵都由我们自己的生成器产生；多群算例是 Yue 等 2026 的类比，不是他们的矩阵；留出集和测试集来自同样的生成器，只是换了种子和参数。
+\item 判据不统一：FD-LGF 系列（11 月 3 日）用 PCG 和 $\|r\|/\|f\|\le10^{-10}$；bt-fd 和 FluxMG（11 月 6--9 日）用双双精度原残差 $10^{-8}$。不同节之间的比值不能直接相比。
+\item BoomerAMG 对照：FD-LGF 系列为默认参数（三维另测 $\theta$）；FluxMG 为每个算例 8--10 组设置中的最优；bt-fd 为基线和 12 组中筛出的调参版本。
+\end{itemize}
+
+\section{数据来源}\label{sec:files}
+\begin{itemize}
+\item FD-LGF：\texttt{FD\_LGF/report/}（$\chi^x$ 系列），\texttt{FD\_LGF/high\_contrast/report\_hc/}（10 类二维和 5 类三维系数）；报告 01。
+\item bt-fd：\texttt{FD\_LGF/regions/report/report\_h57.tex}、\texttt{report\_audit\_fix.tex}、\texttt{report\_bt\_alternatives.tex}；报告 24--26。
+\item FluxMG：\texttt{FD\_LGF/fluxmg/}（\texttt{final\_suite.txt}、\texttt{final\_holdout.txt}、\texttt{autoresearch.jsonl}、\texttt{amg\_configs.jsonl}、\texttt{structured/results\_20261109.jsonl}）；报告 27。
+\item SSR：\texttt{FD\_LGF/gensolver/round3/}（锁定版本 G）；报告 28。
+\item 图：\texttt{FD\_LGF/high\_contrast/report\_hc\_summary/make\_fig.py}；附录表格由同目录的 \texttt{gen\_appendix.py} 直接从结果文件生成。
+\end{itemize}
+
+\clearpage
+\newgeometry{margin=1.5cm}
+\appendix
+\section*{附录：全部实验数据}
+\addcontentsline{toc}{section}{附录：全部实验数据}
+下面按方法列出本文用到的全部实验数据，方法名统一用现在的叫法。表格由同目录的 \texttt{gen\_appendix.py} 从原报告的表格和结果文件生成，数值没有改动。不同附录之间判据不同，见各节开头。
+\input{appendix_data.tex}
+
+\end{document}

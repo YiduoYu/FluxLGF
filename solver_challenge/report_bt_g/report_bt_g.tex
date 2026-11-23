@@ -1,0 +1,121 @@
+\documentclass[11pt,a4paper]{ctexart}
+\usepackage[margin=2.2cm]{geometry}
+\usepackage{amsmath,amssymb,booktabs,float,xcolor,hyperref,enumitem}
+\hypersetup{colorlinks=true,linkcolor=blue!50!black,urlcolor=blue!50!black}
+\setlist{itemsep=2pt,topsep=3pt}
+\title{H42：用 FD-LGF（FDM 背景逆）改进辐射块}
+\author{温州肯恩大学 \quad Nonlinear Poisson 项目}
+\date{2026 年 11 月 4 日}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+H41 发现辐射块 $A_{11}$ 的 V 循环是主要瓶颈。诊断表明 V 循环留下的误差 99\% 在球外常系数区，是最低阶的光滑 Neumann 模式——这正是 FDM（可分离广义 LGF）能精确求逆的部分。
+于是把辐射块的求解改为“V 循环 + FDM 背景逆 + V 循环”（bt-g）。单看辐射块，每秒的误差下降比单纯 V 循环快约 1.5 倍；
+但放进整个预条件里，迭代只从 23 降到 20（$10^{-4}$ 时从 15 降到 10），每步的开销却从 0.47\,s 增加到 0.73\,s，总时间反而更长（21.5\,s 对 16.8\,s）。
+4 条预测中 3 条不成立（第 4 条只有步数部分成立）。原因是离子块 $S_3$ 的单次 V 循环把收益封顶了：在离子块精确求解时，bt-g 只需 12 步（bt-v 23 步）。
+结论：要真正减少迭代，两个标量块必须同时改进；目前最快的仍是 H41 的 bt-v。
+\end{abstract}
+
+\section{诊断（锁定前的探索，已在方案中披露）}
+\begin{itemize}
+\item 对 $A_{11}$ 单独做 V 循环迭代（随机初始误差）：30 次后误差 99\% 在球外区域，Rayleigh 商 $e^TAe/e^TDe\approx10^{-4}$，对应最低阶非常数 Neumann 模式；渐近收敛因子 0.711/次。
+\item 辐射块在球外是常系数（$\kappa=6.08\times10^{9}$，反应 973，远端 Robin $\beta=1.92\times10^{6}$），FDM 可以精确求逆。
+\end{itemize}
+\begin{table}[H]
+\centering
+\small
+\begin{tabular}{lrrr}
+\toprule
+$A_{11}$ 的近似逆（单线程） & 收敛因子 & 每次时间 & 每秒误差下降 $-\ln\rho/t$ \\
+\midrule
+V（amg-3d，H41 所用） & 0.711 & 0.16\,s & 2.1 \\
+G（FDM 背景逆单独） & 0.997 & 0.11\,s & 0.03 \\
+G + V & 0.481 & 0.27\,s & 2.7 \\
+\textbf{V + G + V} & \textbf{0.256} & 0.44\,s & \textbf{3.1} \\
+G + V + G & 0.480 & 0.42\,s & 1.7 \\
+BoomerAMG 默认（Falgout，$\theta=0.25$；设置 9.9\,s） & 0.198 & 0.61\,s & 2.6 \\
+HMIS，$\theta=0.25$，无激进粗化（设置 6.3\,s） & 0.573 & 0.22\,s & 2.5 \\
+\bottomrule
+\end{tabular}
+\caption{FDM 单独几乎无效（球内与背景差别大），但与 V 循环组合后每秒效率最高，且几乎不增加设置时间。}
+\end{table}
+
+\section{方法与预测（运行前锁定）}
+方案 \texttt{protocol\_bt\_g.md}，哈希 86d51705，2026-11-04T05:41:03Z 锁定。bt-g：在 H41 的 bt-v 中把 $A_{11}^{-1}$ 换成
+$z=Vr;\ z\mathrel{+}=G(r-A_{11}z);\ z\mathrel{+}=V(r-A_{11}z)$，离子块不变。接入真实矩阵后测得辐射块收敛因子 0.254，与探索值一致。
+\begin{enumerate}
+\item bt-g 到 $10^{-8}$ 不超过 19 步；
+\item bt-g 总时间少于同批次 bt-v；
+\item bt-g 总时间不超过同批次 amg-3d 的 0.8 倍；
+\item 迭代修正 + bt-g 不超过 4 步达到真实 $10^{-8}$，且快于迭代修正 + bt-v。
+\end{enumerate}
+
+\section{结果}
+单线程，依次运行，负载 4.6--7.5。
+\begin{table}[H]
+\centering
+\small
+\begin{tabular}{llrrrrrr}
+\toprule
+方法 & 目标 & 迭代 & 缩放残差 & 设置 (s) & 求解 (s) & 总计 (s) & 每步 (s) \\
+\midrule
+amg-3d & $10^{-4}$ & 15 & 8.2e-9 & 6.9 & 8.3 & 15.2 & 0.56 \\
+ & $10^{-8}$ & 23 & 3.9e-13 & 6.4 & 12.9 & 19.3 & 0.56 \\
+bt-v（H41） & $10^{-4}$ & 15 & 1.3e-8 & 6.0 & 6.6 & \textbf{12.5} & 0.44 \\
+ & $10^{-8}$ & 23 & 1.8e-12 & 6.1 & 10.7 & \textbf{16.8} & 0.47 \\
+bt-g & $10^{-4}$ & 10 & 5.4e-8 & 7.0 & 7.8 & 14.8 & 0.78 \\
+ & $10^{-8}$ & 20 & 6.0e-12 & 6.9 & 14.7 & 21.5 & 0.73 \\
+\bottomrule
+\end{tabular}
+\caption{真实残差都在 $1.3\times10^{-2}$（双精度表示下限）。}
+\end{table}
+\begin{table}[H]
+\centering
+\small
+\begin{tabular}{lcccr}
+\toprule
+float128 迭代修正（内层 $10^{-6}$） & 第 1 步 & 第 2 步 & 第 3 步 & 总时间 \\
+\midrule
+内层 bt-v & 19 步，1.3e-2 & 9 步，4.1e-6 & 10 步，8.0e-11 & \textbf{34.3\,s} \\
+内层 bt-g & 15 步，1.3e-2 & 9 步，4.1e-6 & 11 步，9.2e-11 & 47.5\,s \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section{预测检验}
+\begin{enumerate}
+\item 不超过 19 步：\textbf{不成立}（20 步；$10^{-4}$ 时 10 步，比 bt-v 少 5 步）。
+\item 快于 bt-v：\textbf{不成立}（21.5\,s 对 16.8\,s）。
+\item 不超过 amg-3d 的 0.8 倍：\textbf{不成立}（1.11 倍）。
+\item 迭代修正 + bt-g：3 步达到 $9.2\times10^{-11}$（步数部分成立），但时间 47.5\,s 慢于 34.3\,s，\textbf{整体不成立}。
+\end{enumerate}
+
+\section{为什么收益这么小（探索性诊断）}
+外层到 $10^{-8}$ 的迭代数：
+\begin{table}[H]
+\centering
+\small
+\begin{tabular}{lcc}
+\toprule
+ & 离子块 $S_3$：一次 V 循环 & 离子块 $S_3$：精确 \\
+\midrule
+辐射块 $A_{11}$：一次 V 循环（bt-v） & 23 & 23 \\
+辐射块 $A_{11}$：V + G + V（bt-g） & 20 & 12 \\
+辐射块 $A_{11}$：精确 & 17 & 3 \\
+\bottomrule
+\end{tabular}
+\end{table}
+两个块的近似误差会叠加：只改进一个块时，另一个块的单次 V 循环就成了上限。辐射块的 FDM 改进本身是有效的（离子块精确时 23 $\to$ 12 步），
+但在离子块仍用一次 V 循环时只换来 3 步，不够抵消每步多出的约 0.26\,s（两次额外 V 循环中的一次、一次 FDM、两次矩阵乘）。
+
+\section{结论与下一步}
+\begin{itemize}
+\item 目前最快的仍是 H41 的 bt-v（单线程 16.8\,s；迭代修正版本 34.3\,s，真实残差 $8\times10^{-11}$）。
+\item 教训：评价内层改进要看“整个预条件每秒的收益”，而不是单个块的收敛因子；两个块必须一起改进。
+\item 下一步可以先改进离子块 $S_3$（热核孤岛紧缩，或壳层局部精确 + 常系数区 FDM），再与 bt-g 组合；
+目标是在每步开销不超过 bt-v 1.5 倍的前提下，把外层迭代降到 10 步以下。
+\item 另一个方向是工程实现：bt-v 已经比整体 AMG 快，换成 C 实现并在 96 核上并行，可能比继续改算法收益更大。
+\end{itemize}
+\end{document}

@@ -1,0 +1,67 @@
+\documentclass[11pt,a4paper]{ctexart}
+\usepackage[margin=2.2cm]{geometry}
+\usepackage{amsmath,amssymb,booktabs,float,graphicx,xcolor,hyperref,enumitem}
+\hypersetup{colorlinks=true,linkcolor=blue!50!black,urlcolor=blue!50!black}
+\setlist{itemsep=2pt,topsep=3pt}
+\title{H48：自适应粗网格紧缩（改进版）——锁定实验}
+\author{温州肯恩大学 \quad Nonlinear Poisson 项目}
+\date{2026 年 11 月 4 日}
+\begin{document}\sloppy
+\maketitle
+\begin{abstract}
+在 H47（报告 14）基础上做了两处改进：用细网格上前 10 步 PCG 的最小 Ritz 值判断 BoomerAMG 是否吃力，这 10 步不浪费；粗网格分辨率改为 $n/4$。
+方案运行前锁定（哈希 6155677c），在新种子的 66 个实例上串行测试。
+结果：$n\le1023$ 时这个方法\textbf{可以放心使用}：被判为困难的 18 个实例时间为 0.57--1.07 倍（中位数 0.72），其中 83\% 不超过 0.90；判为不困难的实例时间比中位数 0.998，几乎没有开销。没有一个 $n\le1023$ 的实例慢于 1.07 倍。
+但在 $n=2047$ 上仍然没有收益，4 个紧缩实例为 0.98--1.27。6 条预测中 4 条成立。
+\end{abstract}
+
+\section{方法（运行前锁定）}
+方案 \texttt{snn/protocol\_cgd2.md}，sha256 6155677c，2026-11-04T14:43:52Z。
+\begin{enumerate}
+\item 细网格 BoomerAMG（$\theta=0.25$，agg\_nl 0），先做 10 步普通 PCG。
+\item 由 PCG 的三对角矩阵求 $BA$ 的最小 Ritz 值 $\lambda_{10}$。$\lambda_{10}\ge0.035$ 时继续同一个 PCG，不做任何额外工作。
+\item 否则在 $n_c=(n+1)/4-1$ 的粗网格上重新离散，做 40 步 Lanczos，取 Ritz 值 $<0.5$ 的向量（最多 24 个），插值并 $A$-正交化，从当前迭代点开始紧缩 PCG。
+\end{enumerate}
+测试种子 3030（首次使用），$n=511$、1023 每族 6 个实例，2047 每族 3 个；单进程串行运行。阈值 0.035 在开发种子 555 上选定。
+
+\section{结果}
+\begin{figure}[H]
+\centering\includegraphics[width=0.95\linewidth]{cgd2_ratio.png}
+\caption{66 个测试实例。实心为探测后做了紧缩，空心为跳过。}
+\end{figure}
+\begin{table}[H]
+\centering\footnotesize
+\begin{tabular}{llrrrr}
+\toprule
+问题 & $n$ & 紧缩 / 实例 & 时间比中位数 & 范围 & 迭代减少（中位数） \\
+\midrule
+circ & 511 / 1023 / 2047 & 4/6, 4/6, 1/3 & 0.79 / 0.77 / 1.01 & 0.62--1.03 & 1.70 / 1.70 / 1.00$\times$ \\
+disk & 511 / 1023 / 2047 & 4/6, 4/6, 2/3 & 0.71 / 0.82 / 1.02 & 0.57--1.27 & 2.11 / 1.69 / 1.03$\times$ \\
+band & 511 / 1023 / 2047 & 1/6, 1/6, 1/3 & 1.01 / 1.00 / 0.99 & 0.91--1.14 & 1.00$\times$ \\
+rot & 511 / 1023 / 2047 & 0/6, 0/6, 0/3 & 1.00 / 1.00 / 0.94 & 0.94--1.08 & 1.00$\times$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+$n=2047$ 上紧缩的 4 个实例：circ 182$\to$149 步（1.03 倍），disk 140$\to$106（0.98）、119$\to$116（1.27），band 61$\to$49（1.14）。所有实例真实残差 $\le10^{-8}$。
+
+\section{预测检验}
+\begin{enumerate}
+\item circ+disk 中位数 $\le0.85$（511、1023），$\le1.00$（2047）：前两项\textbf{成立}（0.75、0.77），2047 \textbf{不成立}（1.02）。
+\item $n\le1023$ 的紧缩实例至少 80\% 不超过 0.90：\textbf{成立}（15/18）。
+\item 未紧缩实例中位数在 $[0.95,1.05]$：\textbf{成立}（0.998，38 个）。
+\item band、rot 中位数 $\le1.05$：\textbf{成立}（0.94--1.01）。
+\item 没有实例超过 1.20：\textbf{不成立}（disk $n=2047$ 一个 1.27）。
+\item 真实残差：\textbf{成立}。
+\end{enumerate}
+
+\section{分析}
+\begin{itemize}
+\item \textbf{改进有效。}与 H47 相比，探测几乎零开销（跳过时 0.91--1.08，中位数 0.998），因此在 BoomerAMG 不吃力的问题上不再亏；在 $n\le1023$ 的困难实例上中位数 0.72。
+\item \textbf{探测仍有漏判。}$n=2047$ 上 circ 一个 204 步的实例探测值为 0.039，被跳过。10 步 Lanczos 的最小 Ritz 值随 $n$ 增大而偏高，固定阈值在大规模上会漏判。不过即使判对，下一条说明这里也省不了多少。
+\item \textbf{规模上限是根本问题。}慢模态的个数随 $n$ 线性增长（报告 13），而紧缩只能放进少量全局向量（这里 $\le24$）。到 $n=2047$ 时，粗网格上的 19 个向量只能覆盖其中很少一部分，迭代几乎不减少（119$\to$116），却要付每步的额外成本。因此全局紧缩适合中等规模；更大规模要把“沿场线”的信息放进 AMG 本身，比如把粗网格慢模态作为 BoomerAMG 插值的近零空间向量，而不是放在外面做紧缩。
+\end{itemize}
+
+\section{结论}
+自适应粗网格紧缩是一个通用、无需训练、几乎零风险的 BoomerAMG 附加部件。$n\le1023$ 时，被判为困难的 18 个实例中 15 个快 1.1--1.75 倍，其余 3 个慢不超过 7\%；未被判为困难的实例与 BoomerAMG 持平。它在 $n=2047$ 上失效，要再往前走需要改 AMG 本身。
+\paragraph{代码与数据。}\texttt{FD\_LGF/generalize/snn/}：\texttt{cgd2.py}、\texttt{run\_cgd2.py}、\texttt{protocol\_cgd2.md}；结果 \texttt{results/h48\_\{511,1023,2047\}.csv}；开发集 \texttt{results/dev2*.csv}、\texttt{dev2047.log}。
+\end{document}

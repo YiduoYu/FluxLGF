@@ -1,0 +1,94 @@
+\documentclass[11pt,a4paper]{ctexart}
+\usepackage[margin=2.2cm]{geometry}
+\usepackage{amsmath,amssymb,booktabs,float,graphicx,xcolor,hyperref,enumitem,xurl}
+\hypersetup{colorlinks=true,linkcolor=blue!50!black,urlcolor=blue!50!black}
+\setlist{itemsep=2pt,topsep=3pt}
+\title{H45：通用方法（含神经网络）能比 BoomerAMG 好多少——上限诊断}
+\author{温州肯恩大学 \quad Nonlinear Poisson 项目}
+\date{2026 年 11 月 4 日}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+新要求：不针对 SC26\_01 特殊优化，做一个泛化强、可以用神经网络（如 SNN）的方法，并在这个问题上超过 BoomerAMG。
+在动手训练任何网络之前，我们先在自建离散的 8 个问题（3D 高对比度扩散 4 个、2D 场向各向异性 1 个、三温 3 个）上测量三类“加在 AMG 上的通用部件”的\textbf{最好可能收益}：
+(1) 子空间/紧缩（SNN、DeepONet 基函数作粗空间都属于这一类），(2) 神经网络给初值，(3) 学习 AMG 参数。
+结论很明确：在高对比度扩散和三温问题上，BoomerAMG 预条件后的谱\textbf{没有孤立的慢模态}（最小 $|\theta|\ge0.31$），
+即使用 Arnoldi 求出的慢模态做紧缩也只省 1--2 步；1\% 精度的初值在扩散问题上只省 3--4 步，在三温问题上反而\textbf{多用} 8--11 步；
+最优 AMG 参数只快 3--21\%。只有各向异性问题（circ）BoomerAMG 真正吃力（429 步），这里参数选择能快 4 倍、初值和子空间也有空间。
+所以：对 SC26\_01 这一类问题，神经网络部件\textbf{不可能}靠减少迭代打败 BoomerAMG；要赢只能让每步更便宜，而这件事可以做成通用的（见第 5 节）。
+\end{abstract}
+
+\section{问题与思路}
+文献里的神经网络求解器/预条件子大致分三类（详见 \texttt{literature/survey.md}）：
+\begin{itemize}
+\item \textbf{子空间类}：SNN（Xu、Sheng，arXiv 2404.08223）用网络的子空间层生成基函数再做最小二乘；DeepONet 的 trunk 基函数作两层法粗空间或紧缩空间（Kopaničáková、Karniadakis，arXiv 2401.02016、2508.00101）；
+NeuraLSP（arXiv 2601.20174）学习 AMG 近零空间。它们都是“给 Krylov 方法补一个低维子空间”。
+\item \textbf{初值/算子类}：HINTS（arXiv 2208.13273）、我们之前的 CNN/UNet：网络给出近似解，迭代法修正。
+\item \textbf{学习 AMG}：GNN 学插值（Luz 等，ICML 2020）、CNN 预测强连接阈值 $\theta$（Caldana、Antonietti、Dede，CAMWA 2024，未见过的系数上最多省 30\% 时间）。
+\end{itemize}
+文献中没有一篇在大规模 3D 扩散问题上用神经网络预条件子打败 BoomerAMG；Graph Neural Preconditioner（ICLR 2025）在 SuiteSparse 上也是 AMG/ILU 赢得多，GNP 只在病态的非 PDE 矩阵上占优。
+因此先做“上限诊断”：如果某一类部件在理想情况下都省不了多少，就不值得训练网络。
+
+\section{实验设计（运行前锁定）}
+方案 \texttt{generalize/protocol\_ceiling.md}，哈希 f3d9e8bc，2026-11-04T10:02:54Z。
+\paragraph{测试集（自建离散，\texttt{suite.py}）。}
+lognorm3、tubes、insul、perc3：3D 标量扩散，对比度 $10^6$，$64^3$；circ：2D 圆形场向各向异性，比值 $10^4$，$511^2$；3t-base（SC26\_01 同类参数）、3t-hard（$G=1$）、3t-feed（$F=1,G=10^{-2}$）：自建三温离散，$m=64$。
+\paragraph{求解器。}BoomerAMG（与 H40 相同参数）右预条件 GMRES(50)，$10^{-8}$（求解器自报残差），$x_0=0$，单线程，所有方法用同一个 GMRES 实现。
+\paragraph{三个上限。}
+D1：从 100 步 Arnoldi 求 $AM^{-1}$ 的调和 Ritz 向量，取 $k=4,16,48$ 个最慢模态做紧缩（$z=Mr+Q(r-AMr)$）——这是任何 SNN/DeepONet 子空间能达到的上限；
+D2：初值 $x_0=x^*(1+\varepsilon\eta)$，$\eta$ 为光滑随机场，$\varepsilon=10^{-1},10^{-2}$——神经网络初值的上限；
+D3：36 组 AMG 参数（$\theta$、aggressive 层数、$P_{\max}$、光滑子）中最快的一组——学习参数选择的上限。
+
+\section{结果}
+\begin{figure}[H]
+\centering
+\includegraphics[width=\linewidth]{ceiling.png}
+\caption{三类部件相对 BoomerAMG 的上限（小于 1 表示更好）。D1、D2 为迭代数之比，D3 为总时间之比。}
+\end{figure}
+\begin{table}[H]
+\centering\footnotesize\setlength{\tabcolsep}{3.5pt}
+\begin{tabular}{lrrrrrrl}
+\toprule
+问题 & AMG 迭代 & 最小 $|\theta_1|$ & D1 $k{=}16$ & D2 $10^{-1}$ / $10^{-2}$ & D2 初始残差 & D3 时间比 & 最优参数 \\
+\midrule
+lognorm3 & 14 & 0.32 & 12 & 12 / 10 & 0.21 / 0.021 & 0.79 & $\theta$0.25 agg1 \\
+tubes & 14 & 0.34 & 13 & 13 / 11 & 0.14 / 0.014 & 0.96 & $\theta$0.25 agg1 \\
+insul & 14 & 0.42 & 13 & 12 / 11 & 0.40 / 0.040 & 0.95 & $\theta$0.7 agg1 \\
+perc3 & 13 & 0.40 & 12 & 12 / 10 & 0.12 / 0.012 & 0.97 & $\theta$0.25 agg1 \\
+circ & 429 & $7.7\times10^{-4}$ & 418 & 343 / 275 & 0.77 / 0.077 & \textbf{0.25} & $\theta$0.25 agg0 \\
+3t-base & 18 & 0.31 & 17 & 27 / 26 & $2.8\times10^{9}$ / $2.8\times10^{8}$ & 0.93 & $\theta$0.25 agg1 \\
+3t-hard & 18 & 0.31 & 17 & 27 / 26 & $2.9\times10^{9}$ / $2.9\times10^{8}$ & 0.95 & $\theta$0.25 agg1 \\
+3t-feed & 15 & 0.31 & 14 & 27 / 26 & $2.8\times10^{9}$ / $2.8\times10^{8}$ & 0.92 & $\theta$0.25 agg1 \\
+\bottomrule
+\end{tabular}
+\caption{主要数字（迭代到 $10^{-8}$）。D2 初始残差为 $\|b-Ax_0\|/\|b\|$。}
+\end{table}
+
+\section{预测检验}
+\begin{enumerate}
+\item D1：7 个非 circ 问题 $k{=}16$ 紧缩省的迭代中位数不超过 20\%：\textbf{成立}（7\%）。circ 至少省 50\%：\textbf{不成立}（3\%）。
+但这一条不能下结论：小规模预试验（$127^2$）里 circ 从 178 步降到 48 步；$511^2$ 上 100 步 Arnoldi 还没算准慢模态（$k{=}48$ 时 $|\theta_{48}|=0.47$ 却几乎不省步），所以 D1 在 circ 上不是真正的上限。
+\item D2：$\varepsilon=10^{-2}$ 中位数至少省 25\%：\textbf{不成立}（中位数 21\%，三温问题反而多用 44--73\%）；$\varepsilon=10^{-1}$ 不超过 20\%：\textbf{成立}。
+\item D3：最优参数时间比中位数不超过 0.8：\textbf{不成立}（0.94）；没有一组参数在 8 个问题上都在最优的 10\% 以内：\textbf{成立}（最好的通用组合也要慢 1.39 倍）。
+\item 非 circ 问题 $|\theta_1|>0.2$、circ $<0.01$：\textbf{成立}（0.31--0.42；$7.7\times10^{-4}$）。
+\end{enumerate}
+
+\section{分析与结论}
+\begin{itemize}
+\item \textbf{为什么子空间类（SNN、DeepONet 粗空间）在这类问题上没用。}高对比度扩散和三温矩阵都是 M-矩阵型的扩散算子，BoomerAMG 的粗网格已经吸收了高导区“孤岛”带来的近零模态；
+预条件后谱的最小值仍有 0.31，残差每步大约均匀下降 3--4 倍（14--18 步到 $10^{-8}$），不存在“少数几个拖后腿的模态”可以补。这与 Aksoylu--Graham--Klie--Scheichl 的分析一致：对角缩放这类不感知系数结构的预条件子才会留下个数等于高导孤岛数的小特征值，AMG 已经处理了它们。
+文献里 DeepONet 紧缩的大收益都是加在 SSOR、ICC、ASM 这类弱预条件子上的，并没有和 AMG 比。
+\item \textbf{为什么神经网络初值在三温问题上有害。}三温矩阵里离子导热在热核中高达 $3\times10^{16}$，光滑的 1\% 相对误差也会产生 $10^8$ 倍于 $\|b\|$ 的残差。
+网络初值必须在能量范数下准确，而普通的 $L^2$ 训练做不到这一点。在扩散问题上，即使 1\% 精度的初值也只省 3--4 步（约 25\%），而网络推断本身还要时间。
+\item \textbf{学习参数选择}：在 6 个问题上最优参数都是同一组（$\theta=0.25$，agg 1），收益只有 3--8\%（lognorm3 21\%）；只在 circ 上差 4 倍。Caldana 等报告的“最多 30\%”与此一致。
+\item \textbf{BoomerAMG 真正的弱点在各向异性}（circ：429 步，H34 的二维结果也是如此）。那里慢模态集中，SNN/DeepONet 子空间和参数学习都有真实的空间。
+\end{itemize}
+\paragraph{对“在 SC26\_01 上超过 BoomerAMG 且泛化”的含义。}
+迭代数已经接近最优，能赢的只有“每步更便宜”。我们的 bt 系列正是这样赢的（报告 07、11），它利用的是矩阵的\textbf{多物理场块结构}，而不是三温方程本身的物理。
+因此泛化的方向是把它变成一个只读矩阵、自动决定如何拆分的算法：对任意 $k$ 场耦合系统，从系数计算场间耦合强度和每个场的对角占优程度，
+自动决定哪些场先消去、哪些场联合求解、哪些耦合可以丢掉（bt-v、bt-j 和整体 AMG 都是它的特例）。
+在单场问题上它退化为 BoomerAMG 本身，不会更差。可以用多群辐射扩散、两温、反应扩散等不同物理的自建离散检验泛化性，神经网络（或简单规则）用来做拆分选择。
+另一条路线是在各向异性这类 BoomerAMG 真正吃力的问题上做 SNN 学习子空间，但它对 SC26\_01 帮不上忙。
+\end{document}

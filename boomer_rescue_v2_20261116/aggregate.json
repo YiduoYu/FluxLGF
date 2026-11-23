@@ -1,0 +1,40 @@
+{
+  "cases": 30,
+  "measurements": 304,
+  "failures": 0,
+  "max_residual": 7.969680801014456e-09,
+  "max_manufactured_error": 7.348569898270275e-08,
+  "overall_median_ratio": 0.8705268049544312,
+  "overall_median_cpu_ratio": 0.8491294149599333,
+  "quality_not_met_cases": 0,
+  "groups": {
+    "hard": {
+      "cases": 14,
+      "median_ratio": 0.7034281452886899,
+      "max_ratio": 0.896025593652142
+    },
+    "controls": {
+      "cases": 14,
+      "median_ratio": 1.0312637921213264,
+      "max_ratio": 1.0863387898095922
+    },
+    "topology": {
+      "cases": 2,
+      "median_ratio": 0.7484942669320072,
+      "max_ratio": 0.8248829301789973
+    }
+  },
+  "triggered_adaptive_vs_fixed_median": 0.8714679250142443,
+  "locked_hashes_passed": true,
+  "original_two_repeat_controls": {
+    "median_ratio": 1.0311793757526626,
+    "max_ratio": 1.161320653470496
+  },
+  "criteria": {
+    "accuracy": true,
+    "hard_median_25pct": true,
+    "every_control_overhead_10pct": true,
+    "both_largest_25pct": true
+  },
+  "all_criteria_point_estimates_pass": true
+}

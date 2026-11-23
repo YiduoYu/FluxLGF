@@ -1,0 +1,167 @@
+\documentclass[11pt,a4paper]{ctexart}
+\usepackage[margin=2.1cm]{geometry}
+\usepackage{amsmath,amssymb,booktabs,float,graphicx,xcolor,hyperref,enumitem,array,longtable}
+\hypersetup{colorlinks=true,linkcolor=blue!50!black,urlcolor=blue!50!black}
+\setlist{itemsep=2pt,topsep=3pt}
+\title{bt-fd 的问题与替代方案：文献调研}
+\author{温州肯恩大学 \quad Nonlinear Poisson 项目}
+\date{2026 年 11 月 6 日}
+
+\begin{document}
+\maketitle
+\sloppy
+
+\begin{abstract}
+\textbf{问题。}bt-fd 在多夹杂几何上输给 BoomerAMG（1.09--6.71 倍），也从未在并行环境下测过。文献里有没有更好的方案？是否应该推翻它？
+\textbf{结论。}不建议整体推翻，建议把它拆成两部分判断。
+“bt”部分（消去电子、块三角）应当保留：块三角加 AMG 是三温问题的主流结构\cite{shu2021}，相近的多群问题上有到 2816 核的可扩展性报告\cite{yue2024}。
+“fd”部分（标量块上的 FD-LGF + 特征区直接解）应当降级：它只适合“单一常系数背景占主导”的矩阵，不应再作为通用方法。在这类矩阵上（包括 SC26\_01），串行实测它仍是我们测过最快的，但并行表现完全未知，而比赛的硬件是 96--608 核的单节点。
+\textbf{最值得试的新方向}是把标量块的 BoomerAMG V-cycle 换成结构网格多重网格（SMG/PFMG），这条线项目从未测过。但它在 $10^{17}$ 量级系数上的表现没有文献依据，只是待检验的假设。
+\textbf{不建议}的方向：随机近似 Cholesky、稀疏化嵌套剖分、谱粗空间、低精度或低秩分解。
+下一步是一次同精度的多方法对比，它同时包含刚才中断的同精度复核。
+\end{abstract}
+
+\section{范围与方法}
+\paragraph{研究问题。}针对已发现的问题（多夹杂、内存、缺少选择规则、并行未知、$10^{17}$ 相消），有哪些方案可以改进或取代 bt-fd？什么证据足以推翻它？
+
+\paragraph{检索。}2026-11-06 用网络检索覆盖七个主题：三温与辐射扩散预条件、高对比度系数、结构网格多重网格、近似消元、稀疏化直接解、多物理场缩减、对角占优矩阵的高精度算法；另查了比赛官网和样例代码。文献元数据用 Crossref 核对。优先寻找反面证据。
+
+\paragraph{证据等级。}每篇文献标注实际读到的程度：\textbf{全}=读了全文或相关章节，\textbf{摘}=只读了摘要或检索摘录，\textbf{元}=只核对了元数据，\textbf{档}=官方文档或网页。多数论文只读到摘要，因此本报告不引用它们未公开在摘要中的具体数字。
+
+\section{问题诊断：bt-fd 到底输在哪里}
+下表来自报告 24 的独立进程结果。bt-fd 的优势本来是迭代数少，但夹杂增多后这个优势消失，同时每步成本上升。
+
+\begin{table}[H]
+\centering\footnotesize\setlength{\tabcolsep}{3pt}
+\begin{tabular}{lrrrrrr}
+\toprule
+算例 & 特征区 & 因子非零元/块 & 迭代 & 每次迭代 (s) & setup (s) & 时间比 \\
+\midrule
+SC26\_01（原残差） & 5.0--5.5\% & $4.8\times10^{7}$ & 16 / 37 & 0.60 / 0.62 & 6.7 / 6.7 & 约 0.6--0.65 \\
+G9 & 16.3\% & $1.4\times10^{8}$ & 16 / 21 & 0.74 / 0.55 & 13.4 / 4.6 & 1.09 \\
+G10 & 20.3\% & $2.0\times10^{8}$ & 18 / 20 & 0.84 / 0.53 & 17.7 / 4.6 & 1.50 \\
+G8 & 18.4\% & $2.1\times10^{8}$ & 18 / 20 & 0.94 / 0.56 & 22.3 / 6.4 & 1.67 \\
+G11 & 30.8\% & $3.6\times10^{8}$ & 19 / 20 & 4.00 / 0.56 & 38.6 / 4.6 & 6.71 \\
+\bottomrule
+\end{tabular}
+\caption{斜线前后为 bt-fd 和 BoomerAMG。真实矩阵行为内层合计；G8--G11 是 10 步序列，自报残差，G11 的 bt-fd 自身换页。各行判据不同，只看趋势。}
+\end{table}
+
+由此得到三点：(1) 每次预条件要做多次三角回代，成本大致随因子非零元增长；(2) 因子非零元比特征区比例更能解释时间（G8 与 G10 的比例和时间顺序相反，但因子大小和时间顺序一致），这只有 3 个无换页的点，是线索不是规律；(3) H42 显示，$S_3$ 精确求解时迭代从 23 降到 12，说明块三角结构本身还有余量，瓶颈在标量块求解器。
+
+\section{比赛的硬约束}
+以下来自官网\cite{sc26}。之前的比较基本没有针对这些条件：
+\begin{itemize}
+\item \textbf{26\_01：}$\|r\|_2/\|b\|_2<10^{-4}$ 和 $<10^{-8}$ 各 5 分，分别计分。\textbf{内存不超过 9\,GB}（CPU 和 GPU 都要满足）。2025 年同类题 25\_01 的上限是 3\,GB 和 6\,GB，且 MD5 不同，不是同一个矩阵。
+\item \textbf{计时：}端到端墙钟时间，包含分析、准备（含数值分解）和求解；矩阵读入、格式转换和分发不计。所以 setup 不能当作摊销成本。
+\item \textbf{硬件：}单节点，Intel 96 核、国产 LX2 608 核，或海光 DCU 2 卡 + 32 核。\textbf{我们的数据全部是单线程。}
+\item \textbf{软件：}不限，但评分考虑自主性和创新性。
+\item \textbf{日程：}程序提交已于 10 月 30 日关闭，入围名单 11 月 10 日公布，答辩 11 月 27--30 日。官网 2026 年页面未提 float128；样例代码的说明提到了 float128 残差检查\cite{sample}，但我们没有运行过它。
+\end{itemize}
+2025 年 T1 单项奖得主是祺德隆东强队\cite{awards}（“T1 即 25\_01”是推断）。官网对 25\_01 没有公开最优报告链接，所以没能读到他们的方法。这是目前最有价值但没拿到的信息，可以在 SOLVER26 会议上了解。
+
+\section{候选方案}
+\begin{table}[H]
+\centering\footnotesize
+\begin{tabular}{p{3.0cm}p{2.3cm}p{5.2cm}p{4.6cm}}
+\toprule
+方案 & 针对的问题 & 支持证据 & 反面证据与风险 \\
+\midrule
+\textbf{A. bt + BoomerAMG（bt-v、bt-j），已有代码} & 多夹杂、内存、并行 & 块三角 + AMG 是三温主流\cite{shu2021,yue2022}；多群问题上优于单一 AMG\cite{yue2021}，并可扩展到 2816 核\cite{yue2024}。本项目 bt-v 串行为 0.78--0.91 倍 AMG & 真实矩阵上慢于 bt-fd（H53：28.1 对 22.9\,s）；未在 G8--G11 上测过；电子块非对角占优时失效（H43）\\
+\textbf{B. bt + 结构网格多重网格（SMG/PFMG）} & 标量块瓶颈、内存 & 26\_01 就是结构网格 7 点格式\cite{sc26}；SMG“特别稳健”\cite{hypre-smg}，CASTRO 称其对强变系数更稳健\cite{castro}；BoxMG 摘要称 3D 非均匀扩散上比 AMG 快 10 倍\cite{copper2011} & 所有证据都是间接的，没有针对 $10^{17}$ 的测试；10 倍来自 2011 年会议摘要；PFMG 不如 SMG 稳健，SMG 每周期更贵\cite{hypre-smg}；PETSc 需要 DMDA 和 MATHYPRESTRUCT\cite{petsc-pfmg} \\
+\textbf{C. 过滤矩阵上构造 AMG} & setup 和内存 & 明确在三温能量方程上测试过\cite{ye2021}；PETSc 中可用独立的预条件矩阵实现，代价小 & 只读到摘要，没有数字；是否改变胜负未知 \\
+\textbf{D. 分级：小特征区用 bt-fd，否则用 bt-v} & 选择规则 & 第 2 节的因子大小线索；MUMPS 分析阶段可提前得到预计规模 & 规则是我们自己提出的，没有文献支持，需要独立验证集；数值分解前的预测精度未知 \\
+\textbf{E. 按“非对角元 + 对角余量”存储的高精度分解} & $10^{17}$ 相消、Cholesky 尾部 & 对角占优矩阵用这种参数化时，解的误差界不含条件数，成本与 Cholesky 同量级\cite{ye2017,alfa2002,dailey2014} & 需要自己实现稀疏版本；不解决多夹杂的成本；原文的界对实际数值偏悲观 \\
+\textbf{F. hypre MGR} & C/MPI 实现 & 多物理场代数框架，有 21M 自由度的结果\cite{bui2021,hypre-mgr} & 没有三温测试；只支持 IJ 接口；PETSc 的 PCHYPRE 未列出\cite{petsc-hypre}；算法上与 bt-v、AMFR 相近，主要价值是实现 \\
+\bottomrule
+\end{tabular}
+\caption{值得考虑的方案。}
+\end{table}
+
+\paragraph{不建议的方向。}
+\begin{itemize}
+\item \textbf{随机近似 Cholesky（rchol、AC、ParAC）。}它们接受 SDD 矩阵，看起来适合我们的块，但作者自己的结果不支持：rchol 在对比度 $\rho\ge10^{3}$ 时 PCG 在达到 $10^{-10}$ 前停滞\cite{rchol}；ParAC 在高对比度 Poisson 上 77.2\,s 对 HYPRE 13.7\,s（142 对 8 步），摘要明确写 AMG 在结构化 PDE 上通常更合适\cite{parac}；AC 在高对比度网格上每非零元 2.33\,$\mu$s 对 HyPre 0.75\,$\mu$s\cite{gao2023}。我们的对比度约 $10^{15}$，远超它们测试的范围。
+\item \textbf{稀疏化嵌套剖分（spaND、HIF）。}高对比度实验只在 2D\cite{spand}，面向 SPD，实现复杂；H56 中 MUMPS BLR 已经破坏了近奇异核，低秩路线在这里有直接的反面经验。
+\item \textbf{低精度分解。}混合精度确实能省时间和内存\cite{amestoy2023}，但它依赖预条件子足够精确，而我们的核区近奇异，CHOLMOD 的精度差异已经造成 53 对 16 步的差别。
+\item \textbf{谱粗空间（GenEO 及同类）。}粗空间维数随夹杂和通道数增长\cite{galvis2010,spillane2014}，正好落在我们的弱点上；还需要局部特征值求解。
+\item \textbf{AGKS 类奇异摄动预条件。}结构上与 bt-fdd 接近，多孤岛时低秩修正的秩等于孤岛数\cite{aksoylu2009}；而原文称高对比度下与 Ruge--St\"uben AMG 表现几乎相同\cite{agks2008}，也就是说预期打不过 AMG。H56 中每个夹杂一个粗向量也没有帮助。
+\item \textbf{聚合型 AMG（AGMG）。}摘录称比 AMG1R5 更稳健\cite{notay2010}，但全文未能读取；本项目的聚合方法 agg3t-w 在真实矩阵上发散（H39）。除非其他方向都失败，否则不优先。
+\end{itemize}
+
+\section{反方挑战}
+我按“本报告的结论可能错在哪里”逐条检查了一遍（由同一作者完成，不是独立评审）：
+\begin{enumerate}
+\item \textbf{多胶囊算例可能根本不代表真实问题。}真实靶丸是单个胶囊，G8--G11 是我们为了测试泛化造的。真实计算后期的不规则界面和 $\kappa(T)$ 变化才是实际威胁，而我们没有这种数据。所以不能只凭 G8--G11 推翻 bt-fd，这也是我不建议整体推翻的主要原因。
+\item \textbf{“块预条件优于 AMG”的证据大多来自同一研究组}（Yue、Xu、Shu 等），且在非结构网格和不同离散上，我只读到摘要。我们自己测的优势也小得多（0.78--0.91 倍）。这条结论不能直接外推。
+\item \textbf{方案 B 可能完全失败。}PFMG 的点平滑和 $10^{17}$ 系数可能根本不收敛，而 SMG 的平面光滑可能过贵。所以它只作为有明确止损条件的实验。
+\item \textbf{比赛可能不是目标。}提交已经截止；如果你们没有参赛，第 3 节的约束只是参考，方向应由论文或实际应用决定。
+\item \textbf{同精度问题没有解决。}G1--G7 的获胜基于自报残差，bt-fd 的缩放残差比 AMG 大一个数量级以上。如果同精度下比值明显变化，本报告的排序也要调整。
+\end{enumerate}
+
+\section{建议}
+\paragraph{判断。}
+\begin{itemize}
+\item \textbf{保留}块三角和消去电子。
+\item \textbf{对 SC26\_01 这类小特征区矩阵：}bt-fd（Cholesky）串行仍是已测最快，暂不替换，但要先测并行。
+\item \textbf{对一般三温问题：}不再把 bt-fd 作为默认方法。等实验结果后，默认值很可能是 bt + 多重网格。
+\end{itemize}
+
+\paragraph{实验顺序。}
+\begin{table}[H]
+\centering\small
+\begin{tabular}{cp{2.5cm}p{7.2cm}p{4.6cm}}
+\toprule
+ & 实验（工作量） & 内容 & 止损或判定 \\
+\midrule
+1 & 同精度多方法对比（半天） & BoomerAMG（基线和 $\theta=0.25$）、bt-v、bt-j、bt-fd（LU、Cholesky），真实矩阵和 G1、G4、G7--G10，双双精度原残差，独立进程，真实矩阵多轮。\textbf{包含中断的同精度复核} & bt-v 或 bt-j 在 G7--G10 上胜 bt-fd，且真实矩阵上不超过 1.3 倍：成为一般问题的默认 \\
+2 & 标量块结构多重网格（1--2 天） & 先单独在 $S_3$、$A_{11}$ 上测 SMG、PFMG（Galerkin），$m=64$、128，看收敛、时间、内存；通过后再放进 bt & 发散，或比 BoomerAMG V-cycle 慢 1.5 倍以上：放弃 \\
+3 & 并行测试（需要服务器） & BoomerAMG、bt-v、bt-fd 的强可扩展性和总内存，含 9\,GB 上限。本机只有 8 核，只能做初步测试 & bt-fd 在 16 核以上被 bt-v 超过：比赛配置改用 bt-v \\
+4 & 过滤矩阵（半天） & 用 \cite{ye2021} 的思路构造预条件矩阵，加到最优方法上 & 时间或内存改善不到 10\%：不采用 \\
+5 & 高精度分解原型（2--3 天） & 在 $m=32$ 的特征区上验证能否消除 Cholesky 的尾部 & 迭代数不接近 LU：不继续 \\
+\bottomrule
+\end{tabular}
+\end{table}
+实验 1 成本最低，而且决定后面的优先级；止损阈值是我提出的初值，正式实验前应写入锁定方案。
+
+\paragraph{什么证据足以推翻 FD-LGF。}实验 1 或 2 中出现以下任一情况：(a) 某个 bt + 多重网格方法在相同精度下，真实矩阵上不慢于 bt-fd；(b) 并行时 bt-fd 被超过，且无法通过实现改进；(c) 同精度下 G1--G7 的优势消失。
+
+\section{局限}
+\begin{itemize}
+\item 多数论文只读到摘要。BoxMG 全文、AGMG 全文、AGKS 原文、$\alpha$Setup-PCTL、Alfa--Xue--Ye 正文都因网站拒绝或无法连接而没有读到。
+\item 中文期刊和 2026 年比赛报告的覆盖不足；没有找到 2025--2026 年专门针对三温的新论文，不代表不存在。
+\item 没有运行任何新的求解实验。第 2 节的数据来自已有结果，排序和止损阈值是我的判断。
+\item 本调研由 AI 工具完成检索、阅读和撰写，子任务只负责抓取网页；关键数字已对照网页原文核对，但没有独立的人工评审。
+\end{itemize}
+
+\begin{thebibliography}{99}
+\small
+\bibitem{shu2021} Shu, Liu, Xu, Yue, Li (2021). Algebraic multigrid block triangular preconditioning for multidimensional three-temperature radiation diffusion equations. \emph{Adv. Appl. Math. Mech.} 13(5):1203--1226. \href{https://doi.org/10.4208/aamm.OA-2020-0210}{doi}. [摘]
+\bibitem{yue2022} Yue, He, Xu, Shu, Wang (2022). Two physics-based Schwarz preconditioners for three-temperature radiation diffusion equations in high dimensions. \emph{Commun. Comput. Phys.} 32(3):829--849. \href{https://doi.org/10.4208/cicp.OA-2021-0223}{doi}. [摘]
+\bibitem{yue2021} Yue, Zhang, Xu, Shu, Shi (2021). Algebraic multigrid block preconditioning for multi-group radiation diffusion equations. \emph{Commun. Comput. Phys.} 29(3):831--852. \href{https://doi.org/10.4208/cicp.OA-2020-0030}{doi}. [全，arXiv:2002.04958 的相关章节]
+\bibitem{yue2024} Yue, Xia, Chen, Xu, Shu (2024). A generalized selectively relaxed matrix splitting preconditioning strategy for three-dimensional flux-limited multi-group radiation diffusion equations. \emph{Numer. Math. Theor. Meth. Appl.} 17(3):630--657. \href{https://doi.org/10.4208/nmtma.OA-2023-0098}{doi}. [摘；多群问题，不是三温]
+\bibitem{ye2021} Ye, An, Xu, Xu, Yang (2021). A filter in constructing the preconditioner for solving linear equation systems of radiation diffusion problems. \emph{Appl. Math. Comput.} 399:126010. \href{https://doi.org/10.1016/j.amc.2021.126010}{doi}. [摘]
+\bibitem{copper2011} Moulton, MacLachlan, Chartier (2011). Robust and adaptive multigrid methods: comparing structured and algebraic approaches. Copper Mountain Conference 摘要；期刊版 \emph{Numer. Linear Algebra Appl.} 19(2):389--413 (2012), \href{https://doi.org/10.1002/nla.837}{doi}. [摘]
+\bibitem{castro} Zhang, Howell, Almgren, Burrows, Bell (2011). CASTRO: a new compressible astrophysical solver. II. Gray radiation hydrodynamics. \href{https://arxiv.org/abs/1105.2466}{arXiv:1105.2466}. [摘，检索到的全文片段]
+\bibitem{hypre-smg} hypre 文档：\href{https://hypre.readthedocs.io/en/latest/solvers-smg-pfmg.html}{SMG、PFMG、SysPFMG}。相关原始论文：Dendy (1982) \emph{J. Comput. Phys.} 48(3):366--386；Dendy (1987) \emph{SIAM J. Sci. Stat. Comput.} 8(5):673--685；Schaffer (1998) \emph{SIAM J. Sci. Comput.} 20(1):228--242。[档；原始论文为元]
+\bibitem{petsc-pfmg} PETSc 手册：\href{https://petsc.org/release/manualpages/PC/PCPFMG/}{PCPFMG}、\href{https://petsc.org/release/manualpages/PC/PCSMG/}{PCSMG}。[档]
+\bibitem{petsc-hypre} PETSc 手册：\href{https://petsc.org/release/manualpages/PC/PCHYPRE/}{PCHYPRE}。[档]
+\bibitem{hypre-mgr} hypre 文档：\href{https://hypre.readthedocs.io/en/latest/solvers-mgr.html}{Multigrid Reduction}。[档]
+\bibitem{bui2021} Bui, Hamon, Castelletto, Osei-Kuffuor, Settgast, White (2021). Multigrid reduction preconditioning framework for coupled processes in porous and fractured media. \emph{Comput. Methods Appl. Mech. Eng.} 387:114111. \href{https://doi.org/10.1016/j.cma.2021.114111}{doi}. [全，网页版，数字为抽取]
+\bibitem{ye2017} Ye (2017 修订). Accurate inverses for computing eigenvalues of extremely ill-conditioned matrices and differential operators. \href{https://arxiv.org/abs/1512.05292}{arXiv:1512.05292}. [全，前半部分]
+\bibitem{alfa2002} Alfa, Xue, Ye (2002). Accurate computation of the smallest eigenvalue of a diagonally dominant M-matrix. \emph{Math. Comp.} 71(237):217--237. \href{https://doi.org/10.1090/S0025-5718-01-01325-4}{doi}. [摘]
+\bibitem{dailey2014} Dailey, Dopico, Ye (2014). Relative perturbation theory for diagonally dominant matrices. \emph{SIAM J. Matrix Anal. Appl.} 35(4):1303--1328. \href{https://doi.org/10.1137/130943613}{doi}. [摘]
+\bibitem{rchol} Chen, Liang, Biros (2021). RCHOL: randomized Cholesky factorization for solving SDD linear systems. \emph{SIAM J. Sci. Comput.} 43(6):C411--C438. \href{https://doi.org/10.1137/20M1380624}{doi}. [全，表格已对照原文]
+\bibitem{parac} Liang, Chen, Yaniv, Luo, Tench, Li, Buluc, Demmel, Chen. Tackling parallelization challenges of randomized preconditioners with dependency tracking. \href{https://arxiv.org/abs/2505.02977}{arXiv:2505.02977}, v3 (2026). [全，表格已对照原文；预印本]
+\bibitem{gao2023} Gao, Kyng, Spielman (2023). Robust and practical solution of Laplacian equations by approximate elimination. \href{https://arxiv.org/abs/2303.00709}{arXiv:2303.00709}. [全，表格已对照原文；预印本]
+\bibitem{spand} Cambier, Chen, Boman, Rajamanickam, Tuminaro, Darve (2020). An algebraic sparsified nested dissection algorithm using low-rank approximations. \emph{SIAM J. Matrix Anal. Appl.} 41(2):715--746. \href{https://doi.org/10.1137/19M123806X}{doi}. [摘]
+\bibitem{amestoy2023} Amestoy, Buttari, Higham, L'Excellent, Mary, Vieubl\'e (2023). Combining sparse approximate factorizations with mixed-precision iterative refinement. \emph{ACM Trans. Math. Softw.} 49(1):1--29. \href{https://doi.org/10.1145/3582493}{doi}. [摘]
+\bibitem{galvis2010} Galvis, Efendiev (2010). Domain decomposition preconditioners for multiscale flows in high-contrast media. \emph{Multiscale Model. Simul.} 8(4):1461--1483. \href{https://doi.org/10.1137/090751190}{doi}. [摘]
+\bibitem{spillane2014} Spillane, Dolean, Hauret, Nataf, Pechstein, Scheichl (2014). Abstract robust coarse spaces for systems of PDEs via generalized eigenproblems in the overlaps. \emph{Numer. Math.} 126(4):741--770. \href{https://doi.org/10.1007/s00211-013-0576-y}{doi}. [元]
+\bibitem{agks2008} Aksoylu, Graham, Klie, Scheichl (2008). Towards a rigorously justified algebraic preconditioner for high-contrast diffusion problems. \emph{Comput. Vis. Sci.} 11(4--6):319--331. \href{https://doi.org/10.1007/s00791-008-0105-1}{doi}. [摘，书目记录]
+\bibitem{aksoylu2009} Aksoylu, Yeter. Robust multigrid preconditioners for cell-centered finite volume discretization of the high-contrast diffusion equation. \href{https://arxiv.org/abs/0904.1885}{arXiv:0904.1885}. [全，前半部分]
+\bibitem{notay2010} Notay (2010). An aggregation-based algebraic multigrid method. \emph{Electron. Trans. Numer. Anal.} 37:123--146. [摘]
+\bibitem{sc26} 线性解法器算法与性能优化竞赛官网：\href{https://www.solver-conference.cn/solverchallenge26/}{SolverChallenge26}；\href{https://www.solver-conference.cn/solverchallenge25/}{SolverChallenge25}。[档]
+\bibitem{awards} 往届获奖名单：\href{https://www.solver-conference.cn/solverchallenge26/awards.html}{awards}。[档]
+\bibitem{sample} 比赛样例代码：\href{https://gitee.com/godjs/solverchallenge26_sample_code}{solverchallenge26\_sample\_code}。[档，只读了说明]
+\end{thebibliography}
+\end{document}

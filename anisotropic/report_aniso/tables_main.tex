@@ -1,0 +1,79 @@
+\begin{table}[H]\centering\small
+\caption{$n=1023$：PCG 迭代次数（各 $\chi$ 的范围）}\label{tab:its}
+\begin{tabular}{lccccc}
+\toprule
+系数 & BAMG $\theta{=}0.25$ & BAMG $\theta{=}0.5$ & GMG & FD-LGF $w{=}\frac1{16}$ & FD-LGF $w{=}\frac1{64}$ \\
+\midrule
+aligned 对齐（对照） & 3--8 & 3--8 & 58--1000 & 2--3 & -- \\
+rot30 旋转 30° & 12--28 & 10--19 & 43--111 & 95--244 & -- \\
+rot45 旋转 45° & 13--33 & 13--25 & 40--104 & 112--287 & -- \\
+circ 圆形磁力线 & 23--191 & 29--241 & 72--718 & 131--1000 & -- \\
+disk 局部旋转圆盘 & 20--136 & 28--218 & 50--732 & 4--7 & 7--11 \\
+band 斜断层带 & 22--59 & 24--65 & 39--167 & 6--8 & 11--14 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[H]\centering\small
+\caption{$n=1023$：误差降到 $10^{-8}$ 所需迭代数}\label{tab:k8}
+\begin{tabular}{lccccc}
+\toprule
+系数 & BAMG $\theta{=}0.25$ & BAMG $\theta{=}0.5$ & GMG & FD-LGF $w{=}\frac1{16}$ & FD-LGF $w{=}\frac1{64}$ \\
+\midrule
+aligned 对齐（对照） & 2--5 & 2--5 & 28--407 & 1--2 & -- \\
+rot30 旋转 30° & 7--17 & 6--12 & 23--56 & 50--125 & -- \\
+rot45 旋转 45° & 8--20 & 8--16 & 21--52 & 61--156 & -- \\
+circ 圆形磁力线 & 14--171 & 19--217 & 39--646 & 82--805 & -- \\
+disk 局部旋转圆盘 & 14--129 & 19--211 & 30--682 & 6--7 & 7--10 \\
+band 斜断层带 & 14--43 & 16--49 & 23--131 & 7--8 & 11--16 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[H]\centering\small
+\caption{$n=1023$：总时间 setup+solve（s，单线程）}\label{tab:time}
+\begin{tabular}{lccccc}
+\toprule
+系数 & BAMG $\theta{=}0.25$ & BAMG $\theta{=}0.5$ & GMG & FD-LGF $w{=}\frac1{16}$ & FD-LGF $w{=}\frac1{64}$ \\
+\midrule
+aligned 对齐（对照） & 0.67--1.18 & 0.67--1.22 & 3.70--52.12 & 0.09--0.15 & -- \\
+rot30 旋转 30° & 2.52--5.35 & 1.66--2.52 & 3.49--7.63 & 6.39--20.23 & -- \\
+rot45 旋转 45° & 1.91--4.22 & 3.00--4.80 & 3.25--7.47 & 5.91--13.64 & -- \\
+circ 圆形磁力线 & 4.35--26.96 & 5.23--34.20 & 5.39--51.16 & 6.45--54.61 & -- \\
+disk 局部旋转圆盘 & 2.40--11.00 & 3.52--21.02 & 3.02--45.33 & 5.39--5.88 & 3.91--4.04 \\
+band 斜断层带 & 2.31--4.82 & 2.84--6.25 & 2.18--9.55 & 1.38--1.53 & 1.01--1.19 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[H]\centering\small
+\caption{$n=1023$：setup 时间（s）}\label{tab:setup}
+\begin{tabular}{lccccc}
+\toprule
+系数 & BAMG $\theta{=}0.25$ & BAMG $\theta{=}0.5$ & GMG & FD-LGF $w{=}\frac1{16}$ & FD-LGF $w{=}\frac1{64}$ \\
+\midrule
+aligned 对齐（对照） & 0.45--0.51 & 0.45--0.57 & 0.27--0.32 & 0.02 & -- \\
+rot30 旋转 30° & 0.89--0.92 & 0.69--0.75 & 0.29--0.34 & 0.02 & -- \\
+rot45 旋转 45° & 0.78--0.86 & 0.92--0.96 & 0.32--0.42 & 0.02 & -- \\
+circ 圆形磁力线 & 1.10--1.21 & 1.03--1.26 & 0.33--0.35 & 0.02 & -- \\
+disk 局部旋转圆盘 & 0.68--0.76 & 0.64--0.74 & 0.25--0.27 & 4.61--5.24 & 2.86--3.02 \\
+band 斜断层带 & 0.65--0.66 & 0.64--0.65 & 0.23--0.26 & 0.87--0.88 & 0.32--0.33 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[H]\centering\small
+\caption{$n=1023$：停止时的代数误差（各 $\chi$ 最大值）}\label{tab:err}
+\begin{tabular}{lccccc}
+\toprule
+系数 & BAMG $\theta{=}0.25$ & BAMG $\theta{=}0.5$ & GMG & FD-LGF $w{=}\frac1{16}$ & FD-LGF $w{=}\frac1{64}$ \\
+\midrule
+aligned 对齐（对照） & $9.5{\times}10^{-13}$ & $9.5{\times}10^{-13}$ & $7.0{\times}10^{-12}$ & $4.1{\times}10^{-13}$ & -- \\
+rot30 旋转 30° & $3.1{\times}10^{-13}$ & $7.0{\times}10^{-13}$ & $1.1{\times}10^{-12}$ & $7.5{\times}10^{-13}$ & -- \\
+rot45 旋转 45° & $4.9{\times}10^{-13}$ & $1.5{\times}10^{-12}$ & $9.2{\times}10^{-13}$ & $7.2{\times}10^{-13}$ & -- \\
+circ 圆形磁力线 & $2.1{\times}10^{-9}$ & $1.5{\times}10^{-9}$ & $1.3{\times}10^{-9}$ & $4.2{\times}10^{-3}$ & -- \\
+disk 局部旋转圆盘 & $7.7{\times}10^{-9}$ & $3.5{\times}10^{-9}$ & $2.7{\times}10^{-9}$ & $1.8{\times}10^{-6}$ & $1.4{\times}10^{-7}$ \\
+band 斜断层带 & $4.6{\times}10^{-12}$ & $6.7{\times}10^{-12}$ & $4.0{\times}10^{-11}$ & $1.6{\times}10^{-7}$ & $2.4{\times}10^{-7}$ \\
+\bottomrule
+\end{tabular}
+\end{table}

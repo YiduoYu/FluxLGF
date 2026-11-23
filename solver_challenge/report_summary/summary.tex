@@ -1,0 +1,242 @@
+\documentclass[11pt,a4paper]{ctexart}
+\usepackage[margin=2.2cm]{geometry}
+\usepackage{amsmath,amssymb,booktabs,graphicx,float,xcolor,multirow,hyperref}
+\usepackage[section]{placeins}
+\hypersetup{colorlinks=true,linkcolor=blue!50!black,citecolor=blue!50!black,urlcolor=blue!50!black}
+\title{11 月 3 日晚工作总结\\FD-LGF 在各向异性和三温辐射扩散问题上的改进尝试}
+\author{温州肯恩大学 \quad Nonlinear Poisson 项目（H34--H38）}
+\date{2026 年 11 月 4 日}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+\noindent 昨晚的工作分两条线：
+\begin{enumerate}
+\item \textbf{各向异性张量系数（H34）。}
+目的是找到 BoomerAMG 失效的例子，并检验 FD-LGF 在这些例子上的表现。
+BoomerAMG 在弯曲的场向各向异性上随网格加密而变差，$n=1023$ 时要 144--241 次。
+当各向异性集中在局部区域时，FD-LGF 只要 4--8 次，$\chi\ge10^4$ 时时间是 BoomerAMG 的 0.29--0.66 倍；
+当各向异性覆盖全区域时，FD-LGF 慢 1.8--8 倍。
+\item \textbf{SolverChallenge26\_01 类型的三温矩阵（H35--H38）。}
+真实矩阵还没拿到，下面的数据都来自一个非零元个数与赛题完全相同的替代矩阵（6,291,456 阶）。
+\begin{itemize}
+\item 原始 FD-LGF 不能解这类问题：3000 次不收敛。
+\item 参考文献改进后得到 FD-LGF-3T（$3\times3$ 块缩放 + 块光滑 + box 粗空间，保留平衡形式）。
+它能在 9\,GB 内存内解到 $10^{-8}$，但比 BoomerAMG 慢 1.35--1.95 倍。
+\item 消融发现，\textbf{LGF（常系数 Green 函数）在这类问题上没有贡献}。
+去掉它，并把其余部分改成 V 循环，得到 agg3t-w。
+在对称替代矩阵上它的时间是 BoomerAMG 的 0.41--0.58 倍。
+在两种非对称替代矩阵上它都收敛，而 BoomerAMG 在 $\Delta t=10$ 时停滞或不收敛。
+\end{itemize}
+\end{enumerate}
+\textbf{主要不足：}
+\begin{itemize}
+\item 所有三温结论都只在我们自己构造的替代矩阵上得到。
+\item 表现最好的方法已经不含 LGF。
+\item 实现是单线程 Python，对比对象只有 BoomerAMG，没有对比 PCTL 等专门方法的成熟实现。
+\end{itemize}
+\end{abstract}
+
+\section{昨晚做了什么}
+每个假设在运行前都把方案和代码的哈希值记录在 \texttt{research-log.md} 中（预注册），再与结果对照。
+
+\begin{table}[H]\centering\small
+\caption{11 月 3 日晚的工作（北京时间）}
+\begin{tabular}{p{1.1cm}p{1.3cm}p{6.6cm}p{5.0cm}}
+\toprule
+编号 & 时间 & 内容 & 结论 \\
+\midrule
+H34 & 21:50 & 各向异性张量系数（旋转、圆形磁力线、局部圆盘、断层带），$n=1023$，$\chi\le10^6$ & 局部各向异性 FD-LGF 赢；全局各向异性 FD-LGF 输 \\
+H35 & 22:02 & 赛题矩阵结构分析、替代矩阵、真实矩阵预测锁定 & 原始 FD-LGF 不能解 \\
+H36 & 22:26 & FD-LGF-3T（块缩放 Green 函数 + 块光滑 + box 粗空间） & 能解，比 BoomerAMG 慢 1.35--1.95 倍 \\
+H37 & 22:52 & 提速：剖析、去 LGF 消融、实现优化 & LGF 部分无贡献 \\
+H37b & 22:59 & agg3t-w（块 Jacobi V(1,1) + box 聚合 W 循环） & 0.41--0.58 倍 BoomerAMG 时间 \\
+H38 & 23:38 & 非对称替代矩阵（发射线性化、行缩放），GMRES & agg3t-w 稳健；BoomerAMG 在 $\Delta t=10$ 失效 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section{三温问题：赛题与替代矩阵}
+SolverChallenge26\_01 是激光聚变三维三温能量方程，在 $128^3$ 结构网格上用有限体积 7 点格式离散，矩阵 6,291,456 阶、52,133,888 个非零元。
+评分标准是从读入矩阵到解出结果的总时间，精度目标为 $\|r\|/\|b\|<10^{-4}$ 和 $<10^{-8}$，内存不超过 9\,GB。
+
+阶数等于 $3\times128^3$，说明未知量是 $T_e,T_i,T_r$ 三个温度。
+每个温度块是 7 点格式，同一单元内另有电子--离子、电子--辐射两组交换耦合，合计非零元正好是 52,133,888。
+真实矩阵网上查不到，所以按这个结构构造了替代矩阵（\texttt{surrogate3t.py}），物理背景是靶丸加辐射波。系数的取法如下：
+\begin{itemize}
+\item 扩散系数：$K_e\propto T_e^{2.5}$，$K_r\propto T_r^3/\rho^2$；
+\item 交换系数：$\omega_{ei}\propto\rho^2T_e^{-1.5}$；
+\item 右端项：取物理的 $cT^0/\Delta t$ 加边界项。
+\end{itemize}
+所得矩阵的系数对比度约 $10^7$，交换项占对角元的 99\% 以上。
+
+\section{我们怎样改进 FD-LGF}
+\subsection{原始 FD-LGF 为什么不行}
+FD-LGF 的前提是“可分离背景 + 小范围特征”。三温问题的系数 $\propto T^{2.5}$ 随温度连续变化，98--99\% 的单元都成了“特征”，局部 LU 等于分解整个三维系统，内存放不下。
+只用背景逆时，3000 次不收敛。
+更根本的问题是交换项几乎占满对角元：每个单元的三个温度强耦合，任何按温度分开处理的预条件都会在每个单元留下一个近零模式。
+
+\subsection{试过但不行的方法}
+\begin{table}[H]\centering\small
+\caption{没有效果或效果不够的尝试}
+\begin{tabular}{p{6.0cm}p{3.2cm}p{6.0cm}}
+\toprule
+尝试 & 来源 & 结果 \\
+\midrule
+标量 Green--Jacobi 缩放 & Ladecký 等 2025 & 1182--1801 次，随网格增长 \\
+按系数分区的 deflation & Vuik 等 1999 & 663--1298 次 \\
+按温度分块 SGS + 每块 BoomerAMG & 物理分块 & 800 次以上 \\
+PCTL（自己实现的简化版） & Xu、Mo、An & $m=32$ 时 634 次 \\
+nodal（系统）BoomerAMG & hypre & 177--580 次，比标量 BoomerAMG 差 \\
+ADEF2 形式（每步省一次粗解） & Tang 等 2009 & 比 BNN 形式差（43、127 对 32、54 次） \\
+单层 LU 粗解（$128^3$ 时 9.8 万阶） & & 分解超过 4 分钟，改用多层 \\
+单精度预条件 & & $\Delta t=10$ 时破坏收敛 \\
+按 90\%/99\% 分位数拟合 Green 函数 & & 76--169 次，比中位数差 \\
+只在扩散主导区使用 Green 函数 & FD-LGF 式划分 & 36--104 次，没有改善 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{起作用的改进：FD-LGF-3T}
+保留 FD-LGF 的平衡形式 $P=Q+(I-QA)M(I-AQ)$，它与 BNN / 平衡 deflation 是同一结构，然后把两部分都换掉：
+\begin{enumerate}
+\item \textbf{$3\times3$ 块缩放。}对每个单元的 $3\times3$ 块做 Cholesky 分解，先消去单元内的交换耦合，再对每个温度用常系数 Green 函数（DST）求逆。这一步把迭代数从 1663 降到 112。
+\item \textbf{box 常数粗空间。}用每个 $4^3$ box 上的分片常数向量代替“特征上的精确 LU”，迭代数基本不再随网格增长。
+\item \textbf{块 Jacobi 光滑}（$\omega=0.6$）：迭代数再减半。
+\item \textbf{多层 W 循环}：粗层矩阵仍是三场矩阵，递归使用同一预条件（$128^3\to32^3\to8^3$）。
+\end{enumerate}
+
+\begin{figure}[H]\centering
+\includegraphics[width=0.92\textwidth]{ablation.png}
+\caption{消融：从原 FD-LGF 背景开始，每次只加一个组成部分（CG 到 $10^{-8}$ 的迭代数，$\Delta t=10^{-3}$）。}
+\end{figure}
+
+\subsection{进一步：去掉 LGF，得到 agg3t-w}
+为了提速，我们先检查 LGF 部分有没有用。
+在 $m=64$ 上把 Green 函数换成 $3\times3$ 块 Jacobi，迭代数不变（32 对 32，56 对 54），每步却省掉 3 次三维 DST。
+原因是缩放后，扩散主导区内的系数仍跨越约 7 个数量级，常系数 Green 函数在哪里都不是好的近似。
+
+真正起作用的是块缩放、块光滑和 box 粗空间这三样。
+把它们组织成对称 V(1,1) 循环（box 2、$\omega=0.8$、粗层 W 循环），并改写实现（解析 $3\times3$ 公式、稀疏限制算子），就得到 \textbf{agg3t-w}。
+$m=64$ 时 setup 从约 3\,s 降到 0.15\,s。
+非对称时块逆改用伴随矩阵直接求，外迭代改用 GMRES(50)。
+
+\section{目前的数据}
+\subsection{与赛题同规模（$m=128$，单线程，M1 Pro）}
+\begin{table}[H]\centering\small
+\caption{对称替代矩阵，CG。BoomerAMG 和 agg3t-w 的数字来自同一次运行（H37b），FD-LGF-3T 来自 H37 的新代码运行。}
+\begin{tabular}{llcccc}
+\toprule
+\multirow{2}{*}{工况} & \multirow{2}{*}{方法} & \multicolumn{2}{c}{到 $10^{-4}$} & \multicolumn{2}{c}{到 $10^{-8}$} \\
+ & & 迭代 & 总时间 (s) & 迭代 & 总时间 (s) \\
+\midrule
+\multirow{3}{*}{$\Delta t=10^{-3}$} & BoomerAMG 三维参数 & 5 & 9.4 & 12 & 13.0 \\
+ & FD-LGF-3T & 21 & 14.9 & 37 & 23.7 \\
+ & agg3t-w & 12 & \textbf{4.6} & 25 & \textbf{7.4} \\
+\midrule
+\multirow{3}{*}{$\Delta t=10$} & BoomerAMG 三维参数 & 6 & 10.7 & 16 & 17.2 \\
+ & FD-LGF-3T & 14 & 11.7 & 53 & 33.0 \\
+ & agg3t-w & 12 & \textbf{4.4} & 36 & \textbf{10.0} \\
+\bottomrule
+\end{tabular}
+\end{table}
+默认参数的 BoomerAMG 更慢：$\Delta t=10^{-3}$ 时为 17.1 / 19.6\,s，$\Delta t=10$ 时为 30.9 / 40.8\,s。
+峰值内存：FD-LGF-3T 不超过 5.7\,GB，agg3t-w 不超过 4.3\,GB，都低于 9\,GB 的限制。
+
+\begin{table}[H]\centering\small
+\caption{非对称替代矩阵（H38），GMRES(50) 右预条件，上限 500 次。以原系统的真实残差为准，未达标就重启并计入时间。}
+\begin{tabular}{llcccc}
+\toprule
+\multirow{2}{*}{矩阵 / $\Delta t$} & \multirow{2}{*}{方法} & \multicolumn{2}{c}{到 $10^{-4}$} & \multicolumn{2}{c}{到 $10^{-8}$} \\
+ & & 迭代 & 总时间 (s) & 迭代 & 总时间 (s) \\
+\midrule
+\multirow{2}{*}{发射线性化 / $10^{-3}$} & BoomerAMG 三维参数 & 5 & 10.2 & 13 & 15.0 \\
+ & agg3t-w & 8 & \textbf{4.4} & 22 & \textbf{8.6} \\
+\multirow{2}{*}{发射线性化 / 10} & BoomerAMG 三维参数 & 5 & 10.2 & 500 未收敛 & 375.7 \\
+ & agg3t-w & 9 & \textbf{4.0} & 35 & \textbf{11.9} \\
+\multirow{2}{*}{行缩放 / $10^{-3}$} & BoomerAMG + 对角缩放 & 59 & 52.5 & 58 & 49.8 \\
+ & agg3t-w & 43 & \textbf{15.5} & 83 & \textbf{28.0} \\
+\multirow{2}{*}{行缩放 / 10} & BoomerAMG + 对角缩放 & 500 未收敛 & 357.1 & 500 未收敛 & 361.4 \\
+ & agg3t-w & 27 & \textbf{8.9} & 133 & \textbf{41.9} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{figure}[H]\centering
+\includegraphics[width=\textwidth]{time128.png}
+\caption{$m=128$ 到 $10^{-8}$ 的总时间（对数轴）。斜线柱表示 500 次迭代后仍未达到目标，高度是用掉的时间。FD-LGF-3T 没有在非对称矩阵上测试。}
+\end{figure}
+
+\paragraph{时间步长稳健性（$m=64$）。}$\Delta t$ 从 $10^{-5}$ 到 $10^{3}$，agg3t-w 到 $10^{-8}$ 需 14--37 次，时间是 BoomerAMG 的 0.55--0.74 倍；FD-LGF-3T 需 18--54 次，是 1.9--2.3 倍。
+
+\paragraph{预注册检验。}
+\begin{itemize}
+\item H36：3/3 条预测成立。
+\item H37：只有 1/4 条成立。预测 1--3 是“FD-LGF-3T 用新代码能接近或超过 BoomerAMG”，结果被否定；预测 4（“去掉 DST 后更快”）成立。
+\item H37b：4/4 条成立。
+\item H38：2/2 条成立。
+\end{itemize}
+
+\subsection{各向异性（H34，$n=1023$，$\chi\in\{10^2,10^4,10^6\}$）}
+\begin{table}[H]\centering\small
+\caption{PCG 迭代数与总时间（各 $\chi$ 的范围），FD-LGF 背景宽度 $w=1/16$}
+\begin{tabular}{lcccc}
+\toprule
+系数 & BoomerAMG 迭代 & FD-LGF 迭代 & BoomerAMG (s) & FD-LGF (s) \\
+\midrule
+rot45 旋转 45°（全局） & 13--33 & 112--287 & 1.9--4.8 & 5.9--13.6 \\
+circ 圆形磁力线（全局） & 23--241 & 131--1000 & 4.4--34.2 & 6.5--54.6 \\
+disk 局部旋转圆盘 & 20--218 & \textbf{4--7} & 2.4--21.0 & 5.4--5.9 \\
+band 斜断层带 & 22--65 & \textbf{6--8} & 2.3--6.3 & \textbf{1.4--1.5} \\
+\bottomrule
+\end{tabular}
+\end{table}
+各向异性只占局部区域时，FD-LGF 的迭代数与网格无关。$\chi\ge10^4$ 时，断层带上时间是 BoomerAMG 的 0.29--0.31 倍，圆盘上是 0.53--0.66 倍（$w=1/64$ 时为 0.36--0.48 倍）。
+各向异性覆盖全区域时，局部 LU 无法覆盖，FD-LGF 慢 1.8--8 倍。
+
+\section{不足}
+\begin{enumerate}
+\item \textbf{没有真实矩阵。}三温部分的所有数字都来自我们自己构造的替代矩阵。
+替代矩阵的物理参数和两种非对称方式（发射线性化、行缩放）都是我们的猜测。
+同一个人既设计矩阵又设计方法，有偏向自己方法的风险。
+锁定在 \texttt{protocol\_real.md} 的预测还没有验证。
+\item \textbf{“改进 FD-LGF”的结果已经不是 LGF 方法。}
+真正比 BoomerAMG 快的 agg3t-w 不含 Green 函数，本质上是一个利用物理分块的结构网格聚合多重网格，是从 FD-LGF 一步步消融得到的。
+保留 LGF 的 FD-LGF-3T 能解这类问题，但比 BoomerAMG 慢 1.35--1.95 倍。
+因此严格地说，“FD-LGF 的思想（平衡形式、粗空间代替局部精确解）能用于三温问题”有数据支持，“LGF 本身有用”没有数据支持。
+\item \textbf{对比不完整。}
+\begin{itemize}
+\item BoomerAMG 只试了默认和一组三维参数，没有系统调参。
+\item 没有对比 PCTL、块三角 AMG、物理量 Schwarz 的成熟实现；我们自己实现的简化 PCTL 只是 634 次，很可能低估了它们。
+\item FD-LGF-3T 没有在非对称矩阵上测试。
+\end{itemize}
+\item \textbf{计时条件。}
+\begin{itemize}
+\item 实现是单线程 Python + petsc4py，而 BoomerAMG 是编译好的 C 代码，两者实现层次不同。
+\item 赛题按总时间评分，我们没有计入读取矩阵的时间。
+\item H34 和 H36 运行时机器上有其他任务（负载最高约 14），时间有噪声，报告中已注明。
+\end{itemize}
+\item \textbf{非对称情况下迭代数增长。}行缩放、$\Delta t=10$ 时 agg3t-w 要 133 次和 1 次重启。如果真实矩阵的不对称更强，可能需要更强的光滑或非 Galerkin 的粗空间。
+\item \textbf{依赖结构网格和变量排列。}box 聚合要求知道网格结构和三个温度的排列方式。\texttt{load\_real.py} 能自动检测排列，但还没有在真实文件上用过。
+\item \textbf{各向异性部分。}FD-LGF 只在局部各向异性时有优势。预测 3 要求圆盘上的时间不超过 BoomerAMG 的 0.5 倍，实际是 0.53--0.66 倍，这一部分不成立。原因是 LU 区域占网格的 20\%，setup 占了大部分时间。
+\item \textbf{过程中的修正。}H38 第一次运行时发现 GMRES 的残差估计在行缩放矩阵上偏离真实残差，于是在看到任何结果之前加上真实残差重启规则，并重新锁定方案（89261c77 $\to$ 2ed4bcd5）。
+\end{enumerate}
+
+\section{下一步}
+\begin{enumerate}
+\item 拿到真实矩阵后：校验 MD5，检查对称性、M-矩阵性质和变量排列，验证 \texttt{protocol\_real.md} 的预测，再测试 agg3t-w、FD-LGF-3T 和 BoomerAMG。
+\item 把 agg3t-w 写成 C 或 PETSc 原生的 PCMG，并加多线程，与 BoomerAMG 在同一实现层次上比较。
+\item 补充对比 PCTL / 块三角 AMG 的成熟实现，以及调参后的 BoomerAMG。
+\item 如果希望保留 LGF：只在系数接近常数的大块区域使用 Green 函数（例如低密度气体区），其余区域用块光滑，看能否在某些工况下优于纯块光滑。
+\end{enumerate}
+
+\section*{详细报告与数据}
+\small
+\begin{itemize}
+\item 三温详细报告：\texttt{FD\_LGF/solver\_challenge/report\_sc/report\_sc.pdf}（10 页）
+\item 各向异性详细报告：\texttt{FD\_LGF/anisotropic/report\_aniso/report\_aniso.pdf}
+\item 原始数据：\texttt{FD\_LGF/solver\_challenge/results/}，\texttt{FD\_LGF/anisotropic/results/}
+\item 预注册与日志：\texttt{autoresearch\_lgf\_amg/research-log.md}
+\end{itemize}
+\end{document}

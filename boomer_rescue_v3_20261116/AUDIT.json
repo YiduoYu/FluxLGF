@@ -1,0 +1,39 @@
+{
+  "status": "passed",
+  "records": 200,
+  "source_hashes": "unchanged",
+  "non_asa_successes": 180,
+  "asa_successes": 18,
+  "failures": [
+    {
+      "case": "two_vortices_1023",
+      "tag": "asa",
+      "rep": 1,
+      "message": "iteration limit",
+      "exception": null,
+      "timeout": null,
+      "budget_skipped": null,
+      "residual": 0.00031458079651549664
+    },
+    {
+      "case": "two_vortices_1023",
+      "tag": "asa",
+      "rep": 0,
+      "message": "iteration limit",
+      "exception": null,
+      "timeout": null,
+      "budget_skipped": null,
+      "residual": 0.00031458079651549664
+    }
+  ],
+  "max_successful_residual": 8.129410127654969e-09,
+  "max_iteration_spread": 0,
+  "diagnostic_cases": 4,
+  "diagnostic_solves": 40,
+  "exploratory_joint_successes": 16,
+  "exploratory_joint_failures": 0,
+  "stderr_records": 0,
+  "anchor_successes": 16,
+  "confirmation_triggered": true,
+  "confirmation_successes": 32
+}

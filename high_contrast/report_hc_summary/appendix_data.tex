@@ -1,0 +1,662 @@
+\section{FD-LGF，教授的 $\chi^x$ 系列（二维、三维）}
+数据来自 11 月 3 日的 $\chi^x$ 实验（\texttt{FD\_LGF/report/}）。算例 A：$a=\chi^x$；B：阶跃分层；C：$\chi^x$ 加规则夹杂；D：$\chi^x$ 加随机夹杂。$w$ 是局部精确解外环的宽度。A、B 没有特征区，只用背景逆，$w$ 不起作用：二维的结果填在 $w=1/16$ 一列，三维填在不带 $w$ 的“FD-LGF”一列。判据 PCG，$\|r\|/\|f\|\le10^{-10}$，单线程，3 次取中位数。
+\subsection{二维}
+\input{tab_chix_2d.tex}
+\subsection{三维}
+\input{tab_chix_3d.tex}
+\FloatBarrier
+\section{FD-LGF，更一般的 10 类二维和 5 类三维系数}
+数据来自报告 01（\texttt{FD\_LGF/high\_contrast/report\_hc/}）。所有系数写成 $a=\chi^g$，$\chi\in\{10^2,10^4,10^6,10^8\}$。二维 $n=1023$ 为确认实验，方案锁定 \texttt{c2ff7672}；其余为探索性扫描。
+\input{tab_hc_scan.tex}
+\input{tab_hc_1023.tex}
+\FloatBarrier
+\section{bt-fd（三温）}
+判据：双双精度原残差 $\|b-Ax\|/\|b\|<10^{-8}$，时间含构建，单线程，独立进程。
+\subsection{H57 相同精度多方法锁定实验（sha256 \texttt{82dbdb84}）}
+\begin{table}[H]
+\centering\small
+\begin{tabular}{lrrrrrr}
+\toprule
+真实 SC26\_01（5 轮） & 总时间中位数 & 范围 & setup & 求解 & 内层迭代 & /基线（配对中位数）\\
+\midrule
+amg-base & 33.00 s & 32.3--35.9 & 6.33 & 21.12 & 37 & 1 \\
+amg-tuned & 31.86 & 30.5--32.6 & 6.65 & 19.19 & 34 & 0.925 \\
+bt-v & 29.80 & 27.6--32.7 & 6.15 & 17.69 & 38 & 0.853 \\
+bt-j & 35.21 & 33.9--40.0 & 6.81 & 22.53 & 38 & 1.067 \\
+bt-fd LU，容差 $10^{-6}$ & 19.58 & 18.9--22.5 & 6.39 & 8.25 & 16 & 0.602 \\
+bt-fd LU，容差 0.1 & 20.21 & 19.1--20.5 & 5.95 & 8.87 & 17 & -- \\
+bt-fd Cholesky，容差 $10^{-6}$ & \textbf{16.78} & 16.4--18.9 & 4.99 & 7.18 & 16 & \textbf{0.508} \\
+bt-fd Cholesky，容差 0.1 & 17.34 & 16.6--17.8 & 4.64 & 7.95 & 18 & -- \\
+\bottomrule
+\end{tabular}
+\caption{全部 3 步修正（残差计算约 5--6\,s）。公共准备约 0.65\,s。除 bt-j 有一次写出 0.86\,GB swap 外，其余 swap 写出为 0。}
+\end{table}
+\begin{table}[H]
+\centering\footnotesize\setlength{\tabcolsep}{4pt}
+\begin{tabular}{lrrrrrrrrr}
+\toprule
+序列 & 特征区 & amg-base & amg-tuned & bt-v & bt-j & bt-fd & chol & chol/tuned & bt-v/tuned \\
+\midrule
+G1 球 & 4.7\% & 246.9 & 220.2 & 208.7 & 264.9 & 126.4 & \textbf{117.2} & 0.53 & 0.95 \\
+G4 长椭球 & 9.1\% & 250.2 & 219.0 & 199.0 & 255.8 & 193.5 & \textbf{141.8} & 0.65 & 0.91 \\
+G7 3 胶囊 & 6.6\% & 258.6 & 215.0 & 225.7 & 275.3 & 165.0 & \textbf{156.8} & 0.73 & 1.05 \\
+G9 10 胶囊 & 16.3\% & 245.5 & 204.7 & \textbf{189.6} & 238.2 & 251.9 & 210.2 & 1.03 & 0.93 \\
+G8 10 胶囊 & 18.4\% & 234.0 & 209.7 & \textbf{194.0} & 230.1 & 326.8 & 283.5 & 1.35 & 0.93 \\
+G10 10 扁方块 & 20.3\% & 233.3 & 207.8 & \textbf{188.4} & 239.8 & 325.4 & 257.7 & 1.24 & 0.91 \\
+\bottomrule
+\end{tabular}
+\caption{10 步总时间（s）。一遍，每步最多 10 次修正，实际 2--3 次。}
+\end{table}
+\subsection{审计修复后的 SC26\_01 配对复测和 H56 G8--G11 重跑（报告 24）}
+\begin{table}[H]
+\centering\footnotesize\setlength{\tabcolsep}{4pt}
+\begin{tabular}{lrrrrrrrr}
+\toprule
+方法 & 总时间中位数 & 范围 & setup & 求解 & DD 残差 & 内层迭代 & 最终原残差 & 峰值内存 \\
+\midrule
+BoomerAMG 基线 ($\theta=0.5$) & 36.87\,s & 34.7--39.6 & 6.74 & 23.07 & 6.33 & 37 & $4.5\times10^{-10}$ & 4.0\,GB \\
+BoomerAMG 筛选 ($\theta=0.25$) & 34.76\,s & 33.5--36.4 & 7.18 & 21.05 & 6.31 & 34 & $2.4\times10^{-10}$ & 4.1\,GB \\
+bt-fd，MUMPS LU & 22.45\,s & 20.1--25.5 & 6.65 & 9.59 & 6.19 & 16 & $5.6\times10^{-11}$ & 4.3\,GB \\
+bt-fd，CHOLMOD & 18.23\,s & 16.9--20.0 & 5.25 & 7.68 & 5.09 & 16 & $1.2\times10^{-10}$ & 4.8\,GB \\
+\bottomrule
+\end{tabular}
+\caption{SC26\_01，$n=6\,291\,456$，20 次运行全部达标，内层 reason 全为 2，都是 3 步修正。公共准备（DD 表）另需约 0.7\,s。}
+\end{table}
+\begin{table}[H]
+\centering\small
+\begin{tabular}{lll}
+\toprule
+配对（同一轮内相除） & 中位数 & 5 轮范围 \\
+\midrule
+bt-fd LU / 基线 AMG & 0.572 & 0.562--0.734 \\
+bt-fd LU / 筛选 AMG & 0.646 & 0.594--0.700 \\
+bt-fd Cholesky / bt-fd LU & 0.812 & 0.737--0.908 \\
+bt-fd Cholesky / 筛选 AMG & 0.525 & 0.500--0.548 \\
+筛选 AMG / 基线 AMG & 0.947 & 0.878--1.048 \\
+\bottomrule
+\end{tabular}
+\end{table}
+\begin{table}[H]
+\centering\scriptsize\setlength{\tabcolsep}{3pt}
+\begin{tabular}{lrrrrrrrrr}
+\toprule
+序列 & 特征区 & 因子非零元（每块） & bt-fd 总时间 & AMG 总时间 & 时间比 & H56 原比值 & bt-fd 单步 & 峰值内存 & swap 写出 \\
+\midrule
+G8 & 18.4\% & $2.1\times10^{8}$ & 200.0\,s (330.1) & 119.5\,s (194.3) & \textbf{1.67} & 1.70 & 15--30\,s & 7.3\,GB & 0.4\,GB \\
+G9 & 16.3\% & $1.4\times10^{8}$ & 130.3 (156.9) & 120.1 (139.3) & \textbf{1.09} & 1.13 & 11--13 & 6.2 & 0.4 \\
+G10 & 20.3\% & $2.0\times10^{8}$ & 169.9 (349.3) & 113.5 (152.9) & \textbf{1.50} & 2.28 & 14--17 & 7.3 & 0 \\
+G11 & 30.8\% & $3.6\times10^{8}$ & 783.7 (1209.6) & 116.7 (275.8) & \textbf{6.71} & 4.39 & 40--121 & 8.6 & 36\,GB \\
+\bottomrule
+\end{tabular}
+\caption{括号内是 H56 原始值。峰值内存和 swap 写出针对 bt-fd 的运行；swap 写出是运行期间的全系统累计量。特征区是外扩后两块中较大的比例。}
+\end{table}
+\FloatBarrier
+\section{FluxMG}
+判据：双双精度原残差 $<10^{-8}$，时间含构建，单线程。多群算例是 Yue 等 2026 的类比，不是他们的矩阵。
+\subsection{第 1 轮最终版本，测试集（对 BoomerAMG $\theta=0.25$，11 月 6 日）}
+{\footnotesize\setlength{\tabcolsep}{4pt}
+\begin{longtable}{llrrrrr}
+\caption{测试集 19 类，SCORE 0.559，赢 17/19，零失败。AMG 取 3 遍最快，FluxMG 为单遍。来源 \texttt{fluxmg/final\_suite.txt}。}\\
+\toprule
+算例 & 类别 & Flux 迭代 & AMG 迭代 & Flux (s) & AMG (s) & 比值 \\
+\midrule
+\endfirsthead
+\toprule
+算例 & 类别 & Flux 迭代 & AMG 迭代 & Flux (s) & AMG (s) & 比值 \\
+\midrule
+\endhead
+\bottomrule
+\endlastfoot
+\texttt{poisson:64} & 常系数 Poisson & 18 & 19 & 0.36 & 0.57 & \textbf{0.62} \\
+\texttt{aniso:64:100} & 对齐各向异性，一个强方向 & 13 & 16 & 0.72 & 0.63 & 1.13 \\
+\texttt{aniso:64:0.01} & 对齐各向异性，一个弱方向 & 18 & 17 & 0.44 & 0.61 & \textbf{0.73} \\
+\texttt{lognorm3} & 高对比度，对数正态 & 18 & 19 & 0.40 & 0.60 & \textbf{0.66} \\
+\texttt{tubes} & 高对比度，导电管道 & 24 & 20 & 0.49 & 0.70 & \textbf{0.69} \\
+\texttt{insul} & 高对比度，绝缘夹杂 & 21 & 19 & 0.49 & 0.65 & \textbf{0.75} \\
+\texttt{perc3} & 高对比度，渗流两相 & 23 & 19 & 0.65 & 0.73 & \textbf{0.90} \\
+\texttt{g3t:64:2e-11:2e-4} & 3T，类 SC26\_01 & 22 & 30 & 1.24 & 2.55 & \textbf{0.49} \\
+\texttt{g3t:64:2e-11:1} & 3T，强电子传导 & 34 & 30 & 2.03 & 3.22 & \textbf{0.63} \\
+\texttt{g3t:64:1:1e-2} & 3T，强反馈 & 20 & 28 & 1.30 & 2.98 & \textbf{0.43} \\
+\texttt{gen:64:1:8:0.5:0:2e-2:1} & 3T，扁方块 & 22 & 30 & 1.19 & 2.70 & \textbf{0.44} \\
+\texttt{gen:64:1:2:1:4:2e-2:1} & 3T，渐变过渡 & 37 & 31 & 1.67 & 2.63 & \textbf{0.63} \\
+\texttt{gen:64:3:2:1:0:2e-2:1} & 3T，3 胶囊 & 29 & 30 & 1.41 & 2.66 & \textbf{0.53} \\
+\texttt{gen:64:10:2:1:0:2e-2:1} & 3T，10 胶囊 & 36 & 30 & 1.66 & 2.75 & \textbf{0.61} \\
+\texttt{gen:64:10:2:1:0:2e-2:2} & 3T，10 胶囊，另一种子 & 36 & 29 & 1.68 & 2.68 & \textbf{0.63} \\
+\texttt{gen:64:10:8:0.5:2:2e-2:3} & 3T，10 渐变扁方块 & 68 & 32 & 2.75 & 2.90 & \textbf{0.95} \\
+\texttt{mg:32:8:1e-2:1e2:0:7} & 多群，AMG 易（类 U13-2） & 22 & 16 & 0.80 & 0.69 & 1.16 \\
+\texttt{mg:32:4:1:1:0:7} & 多群，中（类 U92-1） & 25 & 25 & 0.33 & 0.51 & \textbf{0.66} \\
+\texttt{mg:32:8:1e2:1e-2:1:7} & 多群，AMG 难（类 U107-4） & 121 & 109 & 1.82 & 2.47 & \textbf{0.74} \\
+\end{longtable}}
+\subsection{第 1 轮留出集：最终版本与起点版本}
+{\footnotesize\setlength{\tabcolsep}{4pt}
+\begin{longtable}{llrrrrrr}
+\caption{最终版本（\texttt{best/}），留出 SCORE 0.665，赢 10/10。来源 \texttt{fluxmg/final\_holdout.txt}。}\\
+\toprule
+算例 & 类别 & Flux 迭代 & AMG 迭代 & Flux (s) & AMG (s) & 比值 & 区域数 $K$ \\
+\midrule
+\endfirsthead
+\toprule
+算例 & 类别 & Flux 迭代 & AMG 迭代 & Flux (s) & AMG (s) & 比值 & 区域数 $K$ \\
+\midrule
+\endhead
+\bottomrule
+\endlastfoot
+\texttt{real} & 真实 SC26\_01 & 59 & 34 & 26.67 & 28.82 & \textbf{0.93} & 122 \\
+\texttt{gen:64:5:2:1:0:2e-2:4} & 3T，5 胶囊，新种子 & 32 & 30 & 1.66 & 2.66 & \textbf{0.63} & 12 \\
+\texttt{gen:64:10:2:1:0:2e-2:5} & 3T，10 胶囊，新种子 & 55 & 30 & 2.52 & 2.79 & \textbf{0.90} & 15 \\
+\texttt{gen:64:1:2:2:0:2e-2:6} & 3T，长椭球 & 23 & 30 & 1.37 & 2.82 & \textbf{0.49} & 4 \\
+\texttt{gen:64:2:1:1:1:1e-1:7} & 3T，八面体，10\% 扰动 & 37 & 30 & 1.69 & 2.57 & \textbf{0.65} & 5 \\
+\texttt{g3t:64:1e-4:1e-1} & 3T，新耦合参数 & 23 & 30 & 1.60 & 2.70 & \textbf{0.59} & 4 \\
+\texttt{mg:32:4:1e2:1:1:8} & 多群，新参数 & 14 & 26 & 0.21 & 0.53 & \textbf{0.39} & 3 \\
+\texttt{mg:32:8:1:1e-2:0:9} & 多群，新参数 & 289 & 286 & 4.93 & 6.49 & \textbf{0.76} & 22 \\
+\texttt{aniso:64:1000} & 对齐各向异性，更强 & 11 & 18 & 0.61 & 0.66 & \textbf{0.93} & 1 \\
+\texttt{gen:128:3:2:1:0:2e-2:1} & 3T，3 胶囊，$m=128$ & 34 & 33 & 17.69 & 29.25 & \textbf{0.60} & 8 \\
+\texttt{gen:128:10:2:1:0:2e-2:2} & 3T，10 胶囊，$m=128$ & 29 & 33 & 15.31 & 27.42 & \textbf{0.56} & 22 \\
+\end{longtable}}
+{\footnotesize\setlength{\tabcolsep}{4pt}
+\begin{longtable}{llrrrrrr}
+\caption{起点版本（循环开始时的代码），留出 SCORE 0.556，赢 9/10。}\\
+\toprule
+算例 & 类别 & Flux 迭代 & AMG 迭代 & Flux (s) & AMG (s) & 比值 & 区域数 $K$ \\
+\midrule
+\endfirsthead
+\toprule
+算例 & 类别 & Flux 迭代 & AMG 迭代 & Flux (s) & AMG (s) & 比值 & 区域数 $K$ \\
+\midrule
+\endhead
+\bottomrule
+\endlastfoot
+\texttt{real} & 真实 SC26\_01 & 110 & 34 & 60.67 & 28.82 & 2.11 & 127 \\
+\texttt{gen:64:5:2:1:0:2e-2:4} & 3T，5 胶囊，新种子 & 28 & 30 & 1.94 & 2.66 & \textbf{0.73} & 17 \\
+\texttt{gen:64:10:2:1:0:2e-2:5} & 3T，10 胶囊，新种子 & 45 & 30 & 2.79 & 2.79 & 1.00 & 26 \\
+\texttt{gen:64:1:2:2:0:2e-2:6} & 3T，长椭球 & 27 & 30 & 1.86 & 2.82 & \textbf{0.66} & 5 \\
+\texttt{gen:64:2:1:1:1:1e-1:7} & 3T，八面体，10\% 扰动 & 53 & 30 & 3.09 & 2.57 & 1.20 & 4 \\
+\texttt{g3t:64:1e-4:1e-1} & 3T，新耦合参数 & 27 & 30 & 1.87 & 2.70 & \textbf{0.69} & 5 \\
+\texttt{mg:32:4:1e2:1:1:8} & 多群，新参数 & 14 & 26 & 0.27 & 0.53 & \textbf{0.51} & 9 \\
+\texttt{mg:32:8:1:1e-2:0:9} & 多群，新参数 & 36 & 286 & 1.44 & 6.49 & \textbf{0.22} & 21 \\
+\texttt{aniso:64:1000} & 对齐各向异性，更强 & 9 & 18 & 0.51 & 0.66 & \textbf{0.77} & 1 \\
+\texttt{gen:128:3:2:1:0:2e-2:1} & 3T，3 胶囊，$m=128$ & 34 & 33 & 20.11 & 29.25 & \textbf{0.69} & 10 \\
+\texttt{gen:128:10:2:1:0:2e-2:2} & 3T，10 胶囊，$m=128$ & 42 & 33 & 24.30 & 27.42 & \textbf{0.89} & 29 \\
+\end{longtable}}
+\subsection{第 30 轮：多群分组修复}
+{\footnotesize\setlength{\tabcolsep}{4pt}
+\begin{longtable}{rlrrr}
+\caption{测试集交替配对运行（桌面负载约 3）。中位数：修复前 0.494，修复后 0.565。来源 \texttt{fluxmg/round2\_grouping/paired\_*.txt}。}\\
+\toprule
+顺序 & 代码 & SCORE & 胜 & 失败 \\
+\midrule
+\endfirsthead
+\toprule
+顺序 & 代码 & SCORE & 胜 & 失败 \\
+\midrule
+\endhead
+\bottomrule
+\endlastfoot
+1 & 修复前 & 0.5697 & 17/19 & 0 \\
+2 & 修复后 & 0.5926 & 17/19 & 0 \\
+3 & 修复后 & 0.5484 & 16/19 & 0 \\
+4 & 修复前 & 0.4931 & 17/19 & 0 \\
+5 & 修复后 & 0.5837 & 17/19 & 0 \\
+6 & 修复前 & 0.4930 & 16/19 & 0 \\
+7 & 修复前 & 0.4058 & 16/19 & 0 \\
+8 & 修复后 & 0.4793 & 16/19 & 0 \\
+\end{longtable}}
+{\scriptsize\setlength{\tabcolsep}{3pt}
+\begin{longtable}{lrrrrrrrrl}
+\caption{分组留出集 14 个（规则实现前固定）。“两两”为原 AMFR 两两分组，“规则”为加探针后的分组；比值对 BoomerAMG $\theta=0.25$。两两 SCORE 0.404（12/14），规则 SCORE 1.088（14/14）。分组一栏中 e 表示可由对角解消去的场，\textbar{} 分隔各组。来源 \texttt{round2\_grouping/grouping.txt}。}\\
+\toprule
+算例 & AMG & (s) & 两两 & (s) & 比值 & 规则 & (s) & 比值 & 规则分组 \\
+\midrule
+\endfirsthead
+\toprule
+算例 & AMG & (s) & 两两 & (s) & 比值 & 规则 & (s) & 比值 & 规则分组 \\
+\midrule
+\endhead
+\bottomrule
+\endlastfoot
+\texttt{mg:32:6:10:0.03:0:21} & 300 & 4.87 & 261 & 2.67 & 0.55 & 24 & 0.60 & \textbf{0.12} & \texttt{e6e0\textbar 12345} \\
+\texttt{mg:32:6:10:3:1:21} & 22 & 0.74 & 29 & 0.49 & 0.66 & 29 & 0.52 & \textbf{0.70} & \texttt{e0\textbar 5\textbar 1\textbar 2\textbar 6\textbar 3\textbar 4} \\
+\texttt{mg:32:12:3:0.03:1:22} & 86 & 3.55 & 143 & 3.77 & 1.06 & 29 & 2.73 & \textbf{0.77} & \texttt{\textbar 0123456789101112} \\
+\texttt{mg:32:12:30:0.3:0:22} & 100 & 3.75 & 81 & 2.52 & 0.67 & 19 & 1.68 & \textbf{0.45} & \texttt{e12e0e1e2e3\textbar 4567891011} \\
+\texttt{mg:48:8:0.1:0.01:0:23} & 118 & 10.40 & 121 & 8.23 & 0.79 & 27 & 4.11 & \textbf{0.40} & \texttt{e8\textbar 01234567} \\
+\texttt{mg:48:8:10:1e-3:1:23} & 211 & 17.14 & 391 & 18.43 & 1.08 & 39 & 4.60 & \textbf{0.27} & \texttt{e0\textbar 12345678} \\
+\texttt{mg:48:4:3:0.3:0:24} & 72 & 3.54 & 65 & 1.85 & 0.52 & 23 & 1.23 & \textbf{0.35} & \texttt{e4\textbar 0123} \\
+\texttt{mg:32:8:0.1:1:0:25} & 36 & 1.52 & 38 & 1.03 & 0.68 & 38 & 1.06 & \textbf{0.69} & \texttt{e8\textbar 0\textbar 7\textbar 1\textbar 2\textbar 3\textbar 4\textbar 5\textbar 6} \\
+\texttt{mg:64:12:10:0.05:0:26} & 142 & 42.80 & 157 & 42.01 & 0.98 & 30 & 20.59 & \textbf{0.48} & \texttt{e12e0e1\textbar 234567891011} \\
+\texttt{mg:64:6:1:10:1:26} & 15 & 6.20 & 24 & 3.98 & 0.64 & 24 & 4.05 & \textbf{0.65} & \texttt{\textbar 0\textbar 5\textbar 1\textbar 6\textbar 2\textbar 3\textbar 4} \\
+\texttt{blob:32:6:3:1e-2:0:31:0.1} & 89 & 1.56 & 87 & 1.21 & 0.77 & 22 & 0.67 & \textbf{0.43} & \texttt{e6\textbar 012345} \\
+\texttt{blob:32:6:3:1e-2:1:31:0.1} & 14 & 0.55 & 21 & 0.49 & 0.89 & 21 & 0.47 & \textbf{0.85} & \texttt{\textbar 0\textbar 5\textbar 1\textbar 2\textbar 6\textbar 3\textbar 4} \\
+\texttt{blob:32:12:30:1e-2:0:32:0.03} & 153 & 4.95 & 134 & 3.58 & 0.72 & 23 & 1.74 & \textbf{0.35} & \texttt{e12e0e1e2e3\textbar 4567891011} \\
+\texttt{blob:48:8:1:1e-2:0:33:0.03} & 30 & 3.15 & 31 & 2.53 & 0.80 & 31 & 2.66 & \textbf{0.85} & \texttt{e8\textbar 0\textbar 1\textbar 7\textbar 2\textbar 3\textbar 4\textbar 5\textbar 6} \\
+\end{longtable}}
+{\footnotesize\setlength{\tabcolsep}{4pt}
+\begin{longtable}{llrrrrr}
+\caption{修复后的第 1 轮留出集，SCORE 0.812，赢 10/10（同一负载下）。来源 \texttt{round2\_grouping/holdout.txt}。}\\
+\toprule
+算例 & 类别 & Flux 迭代 & AMG 迭代 & Flux (s) & AMG (s) & 比值 \\
+\midrule
+\endfirsthead
+\toprule
+算例 & 类别 & Flux 迭代 & AMG 迭代 & Flux (s) & AMG (s) & 比值 \\
+\midrule
+\endhead
+\bottomrule
+\endlastfoot
+\texttt{gen:64:5:2:1:0:2e-2:4} & 3T，5 胶囊，新种子 & 32 & 30 & 1.73 & 2.66 & \textbf{0.65} \\
+\texttt{gen:64:10:2:1:0:2e-2:5} & 3T，10 胶囊，新种子 & 55 & 30 & 2.54 & 2.79 & \textbf{0.91} \\
+\texttt{gen:64:1:2:2:0:2e-2:6} & 3T，长椭球 & 23 & 30 & 1.33 & 2.82 & \textbf{0.47} \\
+\texttt{gen:64:2:1:1:1:1e-1:7} & 3T，八面体，10\% 扰动 & 37 & 30 & 1.82 & 2.57 & \textbf{0.71} \\
+\texttt{g3t:64:1e-4:1e-1} & 3T，新耦合参数 & 23 & 30 & 1.76 & 2.70 & \textbf{0.65} \\
+\texttt{mg:32:4:1e2:1:1:8} & 多群，新参数 & 14 & 26 & 0.22 & 0.53 & \textbf{0.42} \\
+\texttt{mg:32:8:1:1e-2:0:9} & 多群，新参数 & 26 & 286 & 1.30 & 6.49 & \textbf{0.20} \\
+\texttt{aniso:64:1000} & 对齐各向异性，更强 & 11 & 18 & 0.59 & 0.66 & \textbf{0.90} \\
+\texttt{gen:128:3:2:1:0:2e-2:1} & 3T，3 胶囊，$m=128$ & 34 & 33 & 20.40 & 29.25 & \textbf{0.70} \\
+\texttt{gen:128:10:2:1:0:2e-2:2} & 3T，10 胶囊，$m=128$ & 29 & 33 & 14.48 & 27.42 & \textbf{0.53} \\
+\end{longtable}}
+{\footnotesize\setlength{\tabcolsep}{4pt}
+\begin{longtable}{rlrrlrrr}
+\caption{修复后真实 SC26\_01，3 次独立运行。来源 \texttt{round2\_grouping/real.txt}。}\\
+\toprule
+运行 & 分组 & 探针 & 总迭代 & 各次修正迭代 & 最终相对残差 & 构建 (s) & 总时间 (s) \\
+\midrule
+\endfirsthead
+\toprule
+运行 & 分组 & 探针 & 总迭代 & 各次修正迭代 & 最终相对残差 & 构建 (s) & 总时间 (s) \\
+\midrule
+\endhead
+\bottomrule
+\endlastfoot
+1 & \texttt{e1\textbar 2\textbar 0} & 3.13e-05 & 59 & 26, 14, 19 & 7.90e-15 & 3.68 & 23.59 \\
+2 & \texttt{e1\textbar 2\textbar 0} & 3.13e-05 & 59 & 26, 14, 19 & 7.90e-15 & 3.57 & 23.63 \\
+3 & \texttt{e1\textbar 2\textbar 0} & 3.13e-05 & 59 & 26, 14, 19 & 7.90e-15 & 3.57 & 24.51 \\
+\end{longtable}}
+\begin{table}[H]
+\centering\small
+\begin{tabular}{lrrrrr}
+\toprule
+独立进程，各 3 遍 & 方法 & 迭代 & 时间 (s) & 配对比值 & 进程峰值内存 (GB) \\
+\midrule
+真实 SC26\_01 & FluxMG & 59 & 22.9，24.0，26.0 & 0.81，0.81，0.87 & 5.0--5.9 \\
+ & BoomerAMG & 34 & 28.3，29.8，30.0 & & 5.2--5.4 \\
+10 胶囊，$m=128$ & FluxMG & 41 & 19.8，19.7，19.2 & 0.74，0.73，0.73 & 5.0--5.7 \\
+ & BoomerAMG & 33 & 26.7，27.0，26.4 & & 6.0--6.5 \\
+\bottomrule
+\end{tabular}
+\caption{FluxMG 迭代更多，但每步便宜，构建约 3.5\,s（部分仍是 Python）。内存是整个进程的峰值，含公共的矩阵和 DD 表，以及 FGMRES 比 GMRES 多存的向量。}
+\end{table}
+\subsection{11 月 9 日预注册比较：FluxMG、hypre 结构多重网格和 BoomerAMG}
+每格为“时间 (s)/迭代”，2 次打乱顺序重复的中位数；任一次失败即记为失败。$^\dagger$ 表示结构方法内部有一组多场用一次 BoomerAMG V-cycle（混合）。AMG 列为 $\theta=0.25$；“AMG 最优”取 D.5 中每个算例最快的设置。比值 = FluxMG / 对照。来源 \texttt{fluxmg/structured/results\_20261109.jsonl}、\texttt{fluxmg/amg\_configs.jsonl}。
+{\scriptsize\setlength{\tabcolsep}{3pt}
+\begin{longtable}{lrrrrrlrr}
+\caption{测试集。}\\
+\toprule
+算例 & FluxMG & PFMG & PFMG-rb & SMG & AMG .25 & AMG 最优（设置） & /结构 & /AMG \\
+\midrule
+\endfirsthead
+\toprule
+算例 & FluxMG & PFMG & PFMG-rb & SMG & AMG .25 & AMG 最优（设置） & /结构 & /AMG \\
+\midrule
+\endhead
+\bottomrule
+\endlastfoot
+\texttt{poisson:64} & 0.38/18 & 0.23/15 & 0.19/19 & 0.65/8 & 0.59/19 & 0.58/19 fast.25 & 1.96 & 0.65 \\
+\texttt{aniso:64:100} & 0.73/13 & 0.29/13 & 0.21/16 & 0.64/8 & 0.64/16 & 0.60/16 fast.5 & 3.41 & 1.22 \\
+\texttt{aniso:64:0.01} & 0.45/18 & 0.28/15 & 0.26/26 & 0.63/8 & 0.63/17 & 0.59/10 falgout.25 & 1.76 & 0.76 \\
+\texttt{lognorm3} & 0.39/18 & 0.26/17 & 0.20/18 & 0.77/10 & 0.62/19 & 0.60/19 fast.25 & 1.90 & 0.65 \\
+\texttt{tubes} & 0.51/24 & 0.84/76 & 0.23/22 & 0.79/11 & 0.73/20 & 0.69/20 fast.25 & 2.24 & 0.74 \\
+\texttt{insul} & 0.47/21 & 0.37/32 & 0.24/22 & 0.71/9 & 0.65/19 & 0.62/19 fast.25 & 1.98 & 0.76 \\
+\texttt{perc3} & 0.72/23 & 0.49/44 & 0.24/26 & 1.00/14 & 0.72/19 & 0.71/20 fast.5 & 3.00 & 1.02 \\
+\texttt{g3t:64:2e-11:2e-4} & 1.26/22 & 1.66/45 & 失败 & 19.09/141 & 2.65/30 & 2.55/30 fast.25 & 0.76 & 0.50 \\
+\texttt{g3t:64:2e-11:1} & 2.07/33 & 2.23/23$^\dagger$ & 2.59/31$^\dagger$ & 3.15/21$^\dagger$ & 3.31/30 & 3.21/30 fast.25 & 0.93 & 0.65 \\
+\texttt{g3t:64:1:1e-2} & 1.44/20 & 1.95/20$^\dagger$ & 1.93/20$^\dagger$ & 1.92/20$^\dagger$ & 2.94/28 & 2.35/30 sys.u & 0.75 & 0.61 \\
+\texttt{gen:64:1:8:0.5:0:2e-2:1} & 1.28/22 & 1.20/29 & 失败 & 9.32/74 & 2.76/30 & 2.61/30 fast.25 & 1.06 & 0.49 \\
+\texttt{gen:64:1:2:1:4:2e-2:1} & 1.82/37 & 1.41/37 & 1.98/69 & 10.29/79 & 2.62/31 & 2.65/31 fast.25 & 1.29 & 0.69 \\
+\texttt{gen:64:3:2:1:0:2e-2:1} & 1.52/30 & 失败 & 失败 & 失败 & 2.63/30 & 2.56/30 fast.25 & 结构均失败 & 0.59 \\
+\texttt{gen:64:10:2:1:0:2e-2:1} & 1.78/36 & 失败 & 失败 & 失败 & 2.75/30 & 2.71/30 fast.25 & 结构均失败 & 0.66 \\
+\texttt{gen:64:10:2:1:0:2e-2:2} & 1.80/36 & 失败 & 失败 & 失败 & 2.74/29 & 2.79/29 fast.25 & 结构均失败 & 0.64 \\
+\texttt{gen:64:10:8:0.5:2:2e-2:3} & 3.07/67 & 失败 & 失败 & 失败 & 2.87/32 & 2.87/32 fast.25 & 结构均失败 & 1.07 \\
+\texttt{mg:32:8:1e-2:1e2:0:7} & 0.82/22 & 0.58/15 & 0.55/18 & 1.16/9 & 0.75/16 & 0.52/16 sys.n & 1.48 & 1.59 \\
+\texttt{mg:32:4:1:1:0:7} & 0.33/25 & 0.27/23 & 0.25/24 & 1.00/23 & 0.52/25 & 0.32/25 sys.n & 1.32 & 1.04 \\
+\texttt{mg:32:8:1e2:1e-2:1:7} & 0.83/23 & 1.51/41$^\dagger$ & 1.49/41$^\dagger$ & 1.53/41$^\dagger$ & 2.58/109 & 1.56/109 sys.n & 0.56 & 0.53 \\
+\end{longtable}}
+{\scriptsize\setlength{\tabcolsep}{3pt}
+\begin{longtable}{lrrrrrlrr}
+\caption{留出集。}\\
+\toprule
+算例 & FluxMG & PFMG & PFMG-rb & SMG & AMG .25 & AMG 最优（设置） & /结构 & /AMG \\
+\midrule
+\endfirsthead
+\toprule
+算例 & FluxMG & PFMG & PFMG-rb & SMG & AMG .25 & AMG 最优（设置） & /结构 & /AMG \\
+\midrule
+\endhead
+\bottomrule
+\endlastfoot
+\texttt{gen:64:5:2:1:0:2e-2:4} & 1.85/32 & 失败 & 失败 & 失败 & 2.67/30 & 2.63/30 fast.25 & 结构均失败 & 0.70 \\
+\texttt{gen:64:10:2:1:0:2e-2:5} & 2.33/55 & 失败 & 失败 & 失败 & 2.94/30 & 2.72/30 fast.25 & 结构均失败 & 0.86 \\
+\texttt{gen:64:1:2:2:0:2e-2:6} & 1.33/23 & 1.80/50 & 失败 & 29.22/229 & 2.83/30 & 2.83/30 fast.25 & 0.74 & 0.47 \\
+\texttt{gen:64:2:1:1:1:1e-1:7} & 1.74/37 & 14.42/600 & 失败 & 43.96/346 & 2.59/30 & 2.50/30 fast.25 & 0.12 & 0.70 \\
+\texttt{g3t:64:1e-4:1e-1} & 1.68/23 & 1.90/23$^\dagger$ & 2.36/31$^\dagger$ & 3.06/21$^\dagger$ & 2.71/30 & 2.54/30 fast.25 & 0.89 & 0.66 \\
+\texttt{mg:32:4:1e2:1:1:8} & 0.21/14 & 0.25/12$^\dagger$ & 0.24/11$^\dagger$ & 0.34/11$^\dagger$ & 0.54/26 & 0.31/26 sys.n & 0.90 & 0.68 \\
+\texttt{mg:32:8:1:1e-2:0:9} & 1.34/26 & 6.47/152$^\dagger$ & 6.55/152$^\dagger$ & 6.47/152$^\dagger$ & 6.43/286 & 4.69/285 sys.n & 0.21 & 0.29 \\
+\texttt{aniso:64:1000} & 0.59/11 & 0.34/16 & 0.24/20 & 0.74/10 & 0.64/18 & 0.52/8 falgout.25 & 2.47 & 1.15 \\
+\texttt{gen:128:3:2:1:0:2e-2:1} & 17.49/34 & 181.74/600 & 失败 & 失败 & 25.79/33 & 25.56/33 fast.25 & 0.10 & 0.68 \\
+\texttt{gen:128:10:2:1:0:2e-2:2} & 15.15/29 & 失败 & 失败 & 失败 & 28.82/33 & 26.92/33 fast.25 & 结构均失败 & 0.56 \\
+\end{longtable}}
+{\scriptsize\setlength{\tabcolsep}{3pt}
+\begin{longtable}{lrrrrrlrr}
+\caption{分组留出集。}\\
+\toprule
+算例 & FluxMG & PFMG & PFMG-rb & SMG & AMG .25 & AMG 最优（设置） & /结构 & /AMG \\
+\midrule
+\endfirsthead
+\toprule
+算例 & FluxMG & PFMG & PFMG-rb & SMG & AMG .25 & AMG 最优（设置） & /结构 & /AMG \\
+\midrule
+\endhead
+\bottomrule
+\endlastfoot
+\texttt{mg:32:6:10:0.03:0:21} & 0.61/24 & 3.65/144$^\dagger$ & 3.55/144$^\dagger$ & 3.53/144$^\dagger$ & 4.79/300 & 3.30/300 sys.n & 0.17 & 0.18 \\
+\texttt{mg:32:6:10:3:1:21} & 0.52/29 & 0.49/30 & 0.45/30 & 1.82/29 & 0.71/22 & 0.52/20 sys.u & 1.16 & 0.99 \\
+\texttt{mg:32:12:3:0.03:1:22} & 2.69/29 & 4.12/86$^\dagger$ & 4.12/86$^\dagger$ & 4.20/86$^\dagger$ & 3.46/86 & 2.70/74 sys.u & 0.65 & 0.99 \\
+\texttt{mg:32:12:30:0.3:0:22} & 1.55/19 & 1.61/13$^\dagger$ & 1.72/13$^\dagger$ & 1.70/13$^\dagger$ & 3.75/100 & 2.17/100 sys.n & 0.96 & 0.71 \\
+\texttt{mg:48:8:0.1:0.01:0:23} & 4.08/27 & 13.36/63$^\dagger$ & 13.03/63$^\dagger$ & 12.84/63$^\dagger$ & 10.15/118 & 7.59/118 sys.n & 0.32 & 0.54 \\
+\texttt{mg:48:8:10:1e-3:1:23} & 4.66/39 & 19.04/220$^\dagger$ & 19.21/220$^\dagger$ & 18.87/220$^\dagger$ & 17.66/211 & 13.73/182 sys.u & 0.25 & 0.34 \\
+\texttt{mg:48:4:3:0.3:0:24} & 1.31/23 & 2.57/38$^\dagger$ & 2.67/38$^\dagger$ & 2.65/38$^\dagger$ & 3.52/72 & 2.53/72 sys.u & 0.51 & 0.52 \\
+\texttt{mg:32:8:0.1:1:0:25} & 1.09/38 & 0.89/38 & 0.81/39 & 3.22/38 & 1.55/36 & 0.79/36 sys.n & 1.35 & 1.38 \\
+\texttt{mg:64:12:10:0.05:0:26} & 21.54/30 & 58.62/83$^\dagger$ & 60.07/83$^\dagger$ & 66.35/83$^\dagger$ & 42.75/142 & 29.02/142 sys.n & 0.37 & 0.74 \\
+\texttt{mg:64:6:1:10:1:26} & 4.20/24 & 3.39/17 & 2.90/18 & 8.82/16 & 6.89/15 & 5.17/15 sys.u & 1.45 & 0.81 \\
+\texttt{blob:32:6:3:1e-2:0:31:0.1} & 0.71/22 & 1.54/49$^\dagger$ & 1.48/49$^\dagger$ & 1.49/49$^\dagger$ & 1.62/89 & 1.14/89 sys.n & 0.48 & 0.62 \\
+\texttt{blob:32:6:3:1e-2:1:31:0.1} & 0.52/21 & 0.38/16 & 0.33/15 & 1.04/12 & 0.57/14 & 0.51/15 sys.u & 1.56 & 1.02 \\
+\texttt{blob:32:12:30:1e-2:0:32:0.03} & 1.68/23 & 1.91/22$^\dagger$ & 1.85/22$^\dagger$ & 1.93/22$^\dagger$ & 5.14/153 & 2.91/153 sys.n & 0.91 & 0.58 \\
+\texttt{blob:48:8:1:1e-2:0:33:0.03} & 2.69/31 & 2.53/31 & 2.21/31 & 8.12/30 & 3.46/30 & 2.51/29 sys.n & 1.22 & 1.07 \\
+\end{longtable}}
+{\scriptsize\setlength{\tabcolsep}{3pt}
+\begin{longtable}{lrrrrrlrr}
+\caption{真实矩阵。}\\
+\toprule
+算例 & FluxMG & PFMG & PFMG-rb & SMG & AMG .25 & AMG 最优（设置） & /结构 & /AMG \\
+\midrule
+\endfirsthead
+\toprule
+算例 & FluxMG & PFMG & PFMG-rb & SMG & AMG .25 & AMG 最优（设置） & /结构 & /AMG \\
+\midrule
+\endhead
+\bottomrule
+\endlastfoot
+\texttt{real} & 23.16/59 & 失败 & 失败 & 失败 & 27.94/34 & 29.01/34 fast.25 & 结构均失败 & 0.80 \\
+\end{longtable}}
+预注册预测 P5（FluxMG 在 $\ge70\%$ 的测试和留出算例上快于最好的结构方法）：59\%，不成立。
+\subsection{BoomerAMG 全部设置}
+每格为“时间 (s)/迭代”，同一 \texttt{solve\_ir} 路径；重复运行取中位数。粗体为该算例最快的设置。fast = HMIS 粗化 + 激进粗化，falgout = Falgout 粗化，noagg = 不用激进粗化，数字为强连接阈值 $\theta$；sys.u/sys.n 为多场 systems 设置（未知量方式 / 节点方式），只对多场算例运行。来源 \texttt{fluxmg/amg\_configs.jsonl}。
+{\tiny\setlength{\tabcolsep}{2.5pt}
+\begin{longtable}{lrrrrrrrrrr}
+\caption{测试集。}\\
+\toprule
+算例 & fast.25 & fast.5 & fast.7 & fast.9 & falgout.25 & falgout.5 & noagg.25 & noagg.5 & sys.u & sys.n \\
+\midrule
+\endfirsthead
+\toprule
+算例 & fast.25 & fast.5 & fast.7 & fast.9 & falgout.25 & falgout.5 & noagg.25 & noagg.5 & sys.u & sys.n \\
+\midrule
+\endhead
+\bottomrule
+\endlastfoot
+\texttt{poisson:64} & \textbf{0.58/19} & 0.60/19 & 0.63/21 & 0.63/22 & 0.93/8 & 0.69/9 & 1.11/15 & 1.18/15 & -- & -- \\
+\texttt{aniso:64:100} & 0.62/16 & \textbf{0.60/16} & 0.60/16 & 0.60/16 & 0.62/8 & 0.61/8 & 0.75/13 & 0.62/10 & -- & -- \\
+\texttt{aniso:64:0.01} & 0.60/17 & 0.64/17 & 0.65/18 & 0.66/19 & \textbf{0.59/10} & 1.17/12 & 0.76/11 & 1.09/11 & -- & -- \\
+\texttt{lognorm3} & \textbf{0.60/19} & 0.69/22 & 0.85/24 & 1.30/35 & 1.12/10 & 1.73/13 & 1.15/14 & 1.20/16 & -- & -- \\
+\texttt{tubes} & \textbf{0.69/20} & 0.71/22 & 0.75/24 & 0.78/26 & 1.51/12 & 1.37/12 & 1.06/12 & 0.99/14 & -- & -- \\
+\texttt{insul} & \textbf{0.62/19} & 0.69/21 & 0.67/21 & 0.74/25 & 0.90/10 & 1.31/12 & 1.17/15 & 1.03/15 & -- & -- \\
+\texttt{perc3} & 0.71/19 & \textbf{0.71/20} & 0.76/24 & 0.81/28 & 1.37/10 & 1.22/12 & 1.05/13 & 0.94/15 & -- & -- \\
+\texttt{g3t:64:2e-11:2e-4} & \textbf{2.55/30} & 2.66/31 & 2.87/35 & 3.23/42 & 2.94/14 & 3.01/17 & 3.33/23 & 3.84/23 & 2.80/40 & 6.00/79 \\
+\texttt{g3t:64:2e-11:1} & \textbf{3.21/30} & 3.47/32 & 3.61/36 & 4.04/44 & 5.44/17 & 5.38/18 & 5.03/22 & 6.43/24 & 7.06/97 & 5.75/77 \\
+\texttt{g3t:64:1:1e-2} & 2.86/28 & 3.11/29 & 3.21/34 & 3.61/42 & 4.93/14 & 4.12/17 & 3.98/21 & 5.35/21 & \textbf{2.35/30} & 2.95/30 \\
+\texttt{gen:64:1:8:0.5:0:2e-2:1} & \textbf{2.61/30} & 2.93/33 & 2.83/35 & 3.26/43 & 3.66/14 & 4.19/19 & 2.97/17 & 3.98/27 & 2.94/42 & 4.99/62 \\
+\texttt{gen:64:1:2:1:4:2e-2:1} & \textbf{2.65/31} & 2.78/33 & 2.99/37 & 3.55/46 & 3.17/15 & 4.62/21 & 3.69/24 & 4.00/27 & 5.53/97 & 7.12/94 \\
+\texttt{gen:64:3:2:1:0:2e-2:1} & \textbf{2.56/30} & 2.81/31 & 3.12/38 & 3.68/49 & 3.12/14 & 4.18/19 & 3.61/23 & 3.88/26 & 2.86/43 & 4.76/60 \\
+\texttt{gen:64:10:2:1:0:2e-2:1} & \textbf{2.71/30} & 2.87/32 & 3.36/41 & 3.87/50 & 3.37/15 & 4.20/20 & 3.62/23 & 3.85/26 & 2.86/42 & 4.86/62 \\
+\texttt{gen:64:10:2:1:0:2e-2:2} & \textbf{2.79/29} & 2.84/32 & 3.40/42 & 4.28/56 & 3.70/20 & 4.85/27 & 3.80/26 & 4.16/29 & 3.01/43 & 4.69/59 \\
+\texttt{gen:64:10:8:0.5:2:2e-2:3} & \textbf{2.87/32} & 2.91/34 & 3.35/40 & 4.19/54 & 3.60/16 & 4.61/22 & 3.68/25 & 4.01/28 & 5.62/95 & 7.33/97 \\
+\texttt{mg:32:8:1e-2:1e2:0:7} & 0.73/16 & 0.71/16 & 0.75/18 & 0.93/25 & 1.22/8 & 1.65/11 & 1.18/11 & 1.19/13 & 0.65/16 & \textbf{0.52/16} \\
+\texttt{mg:32:4:1:1:0:7} & 0.50/25 & 0.54/25 & 0.56/25 & 0.56/26 & 1.86/25 & 1.96/25 & 0.88/25 & 0.92/25 & 0.34/25 & \textbf{0.32/25} \\
+\texttt{mg:32:8:1e2:1e-2:1:7} & 2.43/109 & 2.52/109 & 2.39/109 & 2.44/109 & 2.70/109 & 2.77/109 & 2.60/109 & 2.68/109 & 1.76/91 & \textbf{1.56/109} \\
+\end{longtable}}
+{\tiny\setlength{\tabcolsep}{2.5pt}
+\begin{longtable}{lrrrrrrrrrr}
+\caption{留出集。}\\
+\toprule
+算例 & fast.25 & fast.5 & fast.7 & fast.9 & falgout.25 & falgout.5 & noagg.25 & noagg.5 & sys.u & sys.n \\
+\midrule
+\endfirsthead
+\toprule
+算例 & fast.25 & fast.5 & fast.7 & fast.9 & falgout.25 & falgout.5 & noagg.25 & noagg.5 & sys.u & sys.n \\
+\midrule
+\endhead
+\bottomrule
+\endlastfoot
+\texttt{gen:64:5:2:1:0:2e-2:4} & \textbf{2.63/30} & 2.80/32 & 3.13/38 & 3.57/46 & 3.05/14 & 4.14/19 & 3.59/23 & 3.93/26 & 2.79/42 & 4.83/62 \\
+\texttt{gen:64:10:2:1:0:2e-2:5} & \textbf{2.72/30} & 2.96/33 & 3.36/42 & 3.94/51 & 3.25/15 & 4.25/20 & 3.63/24 & 3.94/27 & 2.96/43 & 4.95/62 \\
+\texttt{gen:64:1:2:2:0:2e-2:6} & \textbf{2.83/30} & 2.90/32 & 3.02/36 & 3.54/46 & 3.39/14 & 4.34/20 & 3.70/24 & 3.88/26 & 3.07/43 & 5.85/75 \\
+\texttt{gen:64:2:1:1:1:1e-1:7} & \textbf{2.50/30} & 2.78/32 & 3.03/36 & 3.55/46 & 3.53/15 & 4.35/19 & 3.60/23 & 4.01/27 & 3.94/64 & 4.83/64 \\
+\texttt{g3t:64:1e-4:1e-1} & \textbf{2.54/30} & 2.77/32 & 2.98/36 & 3.40/43 & 2.74/11 & 3.09/18 & 3.52/23 & 3.76/22 & 5.83/99 & 5.99/80 \\
+\texttt{mg:32:4:1e2:1:1:8} & 0.52/26 & 0.57/26 & 0.55/26 & 0.55/26 & 1.27/26 & 0.78/26 & 0.69/26 & 0.63/26 & 0.32/24 & \textbf{0.31/26} \\
+\texttt{mg:32:8:1:1e-2:0:9} & 6.33/286 & 6.51/286 & 6.59/286 & 6.86/285 & 9.01/285 & 12.05/285 & 8.15/285 & 8.60/285 & 5.10/285 & \textbf{4.69/285} \\
+\texttt{aniso:64:1000} & 0.63/18 & 0.62/18 & 0.63/18 & 0.63/18 & \textbf{0.52/8} & 0.56/9 & 0.52/8 & 0.54/9 & -- & -- \\
+\texttt{gen:128:3:2:1:0:2e-2:1} & \textbf{25.56/33} & 28.27/36 & 31.23/43 & 38.07/57 & 39.05/15 & 47.73/22 & 38.18/27 & 46.43/35 & 29.37/45 & 77.92/106 \\
+\texttt{gen:128:10:2:1:0:2e-2:2} & \textbf{26.92/33} & 31.17/37 & 35.90/48 & 41.99/63 & 39.45/15 & 44.73/22 & 38.59/26 & 44.75/35 & 29.00/45 & 48.64/64 \\
+\end{longtable}}
+{\tiny\setlength{\tabcolsep}{2.5pt}
+\begin{longtable}{lrrrrrrrrrr}
+\caption{分组留出集。}\\
+\toprule
+算例 & fast.25 & fast.5 & fast.7 & fast.9 & falgout.25 & falgout.5 & noagg.25 & noagg.5 & sys.u & sys.n \\
+\midrule
+\endfirsthead
+\toprule
+算例 & fast.25 & fast.5 & fast.7 & fast.9 & falgout.25 & falgout.5 & noagg.25 & noagg.5 & sys.u & sys.n \\
+\midrule
+\endhead
+\bottomrule
+\endlastfoot
+\texttt{mg:32:6:10:0.03:0:21} & 4.78/300 & 4.69/300 & 4.66/300 & 4.73/300 & 5.83/300 & 6.85/300 & 5.48/300 & 5.57/300 & 3.79/300 & \textbf{3.30/300} \\
+\texttt{mg:32:6:10:3:1:21} & 0.70/22 & 0.74/22 & 0.73/22 & 0.73/22 & 2.72/22 & 1.40/22 & 1.07/22 & 0.99/22 & \textbf{0.52/20} & 0.55/22 \\
+\texttt{mg:32:12:3:0.03:1:22} & 3.37/86 & 3.35/86 & 3.36/86 & 3.49/86 & 4.31/85 & 5.28/85 & 4.16/86 & 4.26/86 & \textbf{2.70/74} & 3.06/86 \\
+\texttt{mg:32:12:30:0.3:0:22} & 3.60/100 & 3.52/100 & 3.51/100 & 3.43/100 & 5.05/100 & 4.58/100 & 4.18/100 & 3.91/100 & 2.60/100 & \textbf{2.17/100} \\
+\texttt{mg:48:8:0.1:0.01:0:23} & 9.90/118 & 10.52/118 & 10.51/118 & 11.64/118 & 18.82/117 & 26.02/118 & 14.97/118 & 16.15/118 & 9.16/118 & \textbf{7.59/118} \\
+\texttt{mg:48:8:10:1e-3:1:23} & 16.65/211 & 16.84/211 & 16.68/208 & 17.57/213 & 21.68/212 & 26.16/209 & 20.20/211 & 20.96/212 & \textbf{13.73/182} & 15.53/209 \\
+\texttt{mg:48:4:3:0.3:0:24} & 3.46/72 & 3.84/72 & 3.80/72 & 3.79/72 & 9.83/71 & 10.38/71 & 5.04/72 & 5.51/72 & \textbf{2.53/72} & 2.57/72 \\
+\texttt{mg:32:8:0.1:1:0:25} & 1.52/36 & 1.64/36 & 1.34/36 & 1.49/37 & 11.37/36 & 10.86/36 & 3.18/36 & 3.46/36 & 0.96/36 & \textbf{0.79/36} \\
+\texttt{mg:64:12:10:0.05:0:26} & 42.09/142 & 42.25/142 & 42.11/142 & 43.59/142 & 56.57/142 & 63.63/142 & 50.17/142 & 52.47/142 & 34.34/142 & \textbf{29.02/142} \\
+\texttt{mg:64:6:1:10:1:26} & 6.09/15 & 6.01/15 & 6.30/17 & 7.62/23 & 11.93/10 & 16.12/11 & 9.27/12 & 8.43/12 & \textbf{5.17/15} & 5.24/17 \\
+\texttt{blob:32:6:3:1e-2:0:31:0.1} & 1.57/89 & 1.58/89 & 1.62/89 & 1.66/89 & 2.16/89 & 2.80/89 & 2.01/89 & 2.06/89 & 1.26/89 & \textbf{1.14/89} \\
+\texttt{blob:32:6:3:1e-2:1:31:0.1} & 0.57/14 & 0.60/16 & 0.58/16 & 0.69/20 & 1.25/7 & 1.21/8 & 0.86/11 & 0.85/12 & \textbf{0.51/15} & 0.57/19 \\
+\texttt{blob:32:12:30:1e-2:0:32:0.03} & 4.95/153 & 4.95/153 & 4.89/153 & 4.87/153 & 6.06/153 & 6.25/153 & 5.56/153 & 5.49/153 & 3.70/153 & \textbf{2.91/153} \\
+\texttt{blob:48:8:1:1e-2:0:33:0.03} & 3.10/30 & 3.25/30 & 3.13/30 & 3.39/30 & 4.75/29 & 6.32/30 & 4.70/30 & 4.71/30 & 2.71/30 & \textbf{2.51/29} \\
+\end{longtable}}
+{\tiny\setlength{\tabcolsep}{2.5pt}
+\begin{longtable}{lrrrrrrrrrr}
+\caption{真实矩阵。}\\
+\toprule
+算例 & fast.25 & fast.5 & fast.7 & fast.9 & falgout.25 & falgout.5 & noagg.25 & noagg.5 & sys.u & sys.n \\
+\midrule
+\endfirsthead
+\toprule
+算例 & fast.25 & fast.5 & fast.7 & fast.9 & falgout.25 & falgout.5 & noagg.25 & noagg.5 & sys.u & sys.n \\
+\midrule
+\endhead
+\bottomrule
+\endlastfoot
+\texttt{real} & \textbf{29.01/34} & 29.80/37 & 32.43/44 & 44.80/67 & 47.23/16 & 42.71/23 & 33.47/26 & 47.34/31 & 225.71/450 & 失败 \\
+\end{longtable}}
+\subsection{autoresearch 迭代记录}
+{\scriptsize\setlength{\tabcolsep}{3pt}
+\begin{longtable}{rlll}
+\caption{迭代记录原文（英文）。第 14--29 轮为 16 组同批参数扫描，合并为一行。第 31--33 轮在 11 月 9 日，未按 SCORE 判定。来源 \texttt{fluxmg/autoresearch.jsonl}。}\\
+\toprule
+轮 & SCORE & 结果 & 改动 \\
+\midrule
+\endfirsthead
+\toprule
+轮 & SCORE & 结果 & 改动 \\
+\midrule
+\endhead
+\bottomrule
+\endlastfoot
+0 & -0.0082 & baseline & \parbox[t]{9.2cm}{\raggedright Prototype: flux form, K-cycle, lines, semi-coarsening, region vectors} \\
+1 & -0.0899 & discard & \parbox[t]{9.2cm}{\raggedright Line trigger compares with the weakest other direction (in-plane strength)} \\
+2 & 0.1526 & keep & \parbox[t]{9.2cm}{\raggedright Region vectors on every coarse level, correction after each coarse solve; graded boxes converge (70 its)} \\
+3 & 0.2801 & keep & \parbox[t]{9.2cm}{\raggedright Automatic field reduction (AMFR rules) with one Core cycle per group; multigroup hard worsens 23 -\textgreater{} 121 its} \\
+4 & 0.2352 & discard & \parbox[t]{9.2cm}{\raggedright TAU = 10. Real matrix reaches parity with BoomerAMG but the suite score does not improve; strong candidate to retest} \\
+5 & 0.2129 & discard & \parbox[t]{9.2cm}{\raggedright AMFR spectral grouping} \\
+6 & 0.0895 & discard & \parbox[t]{9.2cm}{\raggedright Convergence probe (8 cycles, limit 0.6) chooses reduced or monolithic correctly, but its cost lowers the score} \\
+7 & 0.3225 & keep & \parbox[t]{9.2cm}{\raggedright Lines only where 4 consecutive anisotropic cells exist: isolated jumps no longer trigger them; insul and perc3 flip to wins} \\
+8 & 0.3276 & discard & \parbox[t]{9.2cm}{\raggedright TAU = 10 on the new base; no score gain, and LINE\_RUN = 4 is seen to hurt the real matrix} \\
+9 & 0.2241 & discard & \parbox[t]{9.2cm}{\raggedright TAU = 10, LINE\_RUN = 1, ANISO = 30: real matrix wins clearly, but whole-line solves make insul and perc3 lose} \\
+10 & 0.3166 & hold & \parbox[t]{9.2cm}{\raggedright Iteration 9 settings with line solves restricted to anisotropic segments: suite score unchanged, real matrix now wins. Held in candidate\_iter10/ pending the user's decision on tie-breaks; score includes the real case} \\
+10 & 0.3166 & keep & \parbox[t]{9.2cm}{\raggedright Held result of iteration 10 kept under the new tie-break} \\
+11 & 0.3301 & discard & \parbox[t]{9.2cm}{\raggedright Per-axis region cut plus no lines on semi-coarsened axes: the real matrix collapses; no suite gain} \\
+12 & 0.3022 & keep & \parbox[t]{9.2cm}{\raggedright Bug fix outside the score rule: coarsening stopped once an axis reached one layer, leaving 4096 cells for dense elimination; too many regions now drop the relative cut. Scores 0.28-0.32 under desktop load} \\
+13 & 0.4321 & keep & \parbox[t]{9.2cm}{\raggedright Matrix parsing in C, one pass over the nonzeros; faces and blocks bit-identical to the numpy version} \\
+29 & 0.538 & discard & \parbox[t]{9.2cm}{\raggedright Cycle V/W, K\_THRESH, ALPHA, REACTION, RHO, TAU, COARSEST, MIN\_REGION, ANISO: none beats base across the suite. K a.5 ties. Parametric ceiling; loop stopped} \\
+30 & 0.565 & keep & \parbox[t]{9.2cm}{\raggedright Grouping probe: if the block-triangular solve contracts slower than 0.7 on the system aggregated to 8\^{}3 boxes, all coupled fields form one group. Reduction moved into flux\_mg.py; bit-identical to amfr.AMFR with the probe off} \\
+31 & -- & discard & \parbox[t]{9.2cm}{\raggedright Gate region vectors by the non-Galerkin share of the coarse reaction (DEFL\_FRAC): separates per suite but a 3T group with share 0.03 still needs them (22 -\textgreater{} 39 its); per-region and probe criteria do not separate either} \\
+32 & -- & discard & \parbox[t]{9.2cm}{\raggedright Finest-level region correction after the cycle only (one Q, one matvec)} \\
+33 & 0.573 / 0.473 vs base 0.550 / 0.527 (paired) & discard & \parbox[t]{9.2cm}{\raggedright Balanced deflation through precomputed H = AW, G = A\^{}T W (no extra matvec), F = 1 sweep, KMIN\_RATIO 4. Patches in round3\_cost/. Setup, mostly build\_regions/assemble\_regions, is now the main cost} \\
+\end{longtable}}
+\FloatBarrier
+\section{SSR（锁定版本 G，11 月 8 日）}
+每行：SSR 迭代和时间；BoomerAMG \texttt{fast.25}；每个算例最优的 BoomerAMG 设置（含 AIR 和 systems 设置）。比值 = SSR / 对照，失败按 8 倍计。判据与 FluxMG 相同（双双精度原残差 $<10^{-8}$），3 次打乱顺序重复。来源 \texttt{gensolver/round3/final\_*\_G.log}。
+{\scriptsize\setlength{\tabcolsep}{3pt}
+\begin{longtable}{lrrrrrlrrr}
+\caption{开发集（23）。对 fast.25 的 SCORE: 0.126  胜 11/23；对每例最优的 SCORE: -0.320  胜 8/23；SSR 失败: ['elast:33:0.3:1e4']}\\
+\toprule
+算例 & SSR & (s) & fast.25 & (s) & 比值 & 最优设置 & 迭代 & (s) & 比值 \\
+\midrule
+\endfirsthead
+\toprule
+算例 & SSR & (s) & fast.25 & (s) & 比值 & 最优设置 & 迭代 & (s) & 比值 \\
+\midrule
+\endhead
+\bottomrule
+\endlastfoot
+\texttt{poisson3d:64} & 22 & 0.62 & 17 & 0.51 & 1.20 & \texttt{fast.25} & 17 & 0.51 & 1.20 \\
+\texttt{aniso:64:100} & 44 & 0.53 & 16 & 0.59 & \textbf{0.91} & \texttt{fast.5} & 16 & 0.55 & \textbf{0.97} \\
+\texttt{rot2d:512:1e-3:30} & 144 & 2.76 & 92 & 2.11 & 1.31 & \texttt{noagg.25} & 17 & 0.86 & 3.22 \\
+\texttt{rot3d:48:1e-2:1e-4} & 62 & 0.69 & 48 & 0.54 & 1.28 & \texttt{fast.7} & 37 & 0.51 & 1.36 \\
+\texttt{fe3d:150000:1:1} & 44 & 1.24 & 46 & 1.4 & \textbf{0.89} & \texttt{fast.9} & 39 & 1.19 & 1.04 \\
+\texttt{fe3d:150000:1e6:2} & 49 & 1.33 & 46 & 1.39 & \textbf{0.95} & \texttt{fast.9} & 41 & 1.23 & 1.08 \\
+\texttt{stretch:48:100} & 48 & 0.59 & 38 & 0.54 & 1.10 & \texttt{fast.5} & 31 & 0.43 & 1.37 \\
+\texttt{lognorm3} & 25 & 0.66 & 19 & 0.56 & 1.18 & \texttt{fast.25} & 19 & 0.56 & 1.18 \\
+\texttt{tubes} & 35 & 0.78 & 20 & 0.66 & 1.18 & \texttt{fast.25} & 20 & 0.66 & 1.18 \\
+\texttt{perc3} & 27 & 0.65 & 19 & 0.68 & \textbf{0.95} & \texttt{fast.25} & 19 & 0.68 & \textbf{0.95} \\
+\texttt{fourth:512} & 26 & 0.66 & 18 & 0.57 & 1.16 & \texttt{falgout.25} & 8 & 0.54 & 1.21 \\
+\texttt{cd2d:512:1e-3:rec} & 18 & 0.6 & 34 & 0.68 & \textbf{0.88} & \texttt{noagg.25} & 20 & 0.62 & \textbf{0.97} \\
+\texttt{cd2d:512:1e-5:rec} & 16 & 0.48 & 26 & 0.61 & \textbf{0.79} & \texttt{noagg.25} & 19 & 0.55 & \textbf{0.87} \\
+\texttt{cd3d:64:1e-3} & 12 & 0.7 & 21 & 1.52 & \textbf{0.46} & \texttt{fast.9} & 39 & 0.9 & \textbf{0.78} \\
+\texttt{elast:41:0.3:1} & 600 & 19.38 & 400 & 19.26 & 1.01 & \texttt{nodal.5} & 47 & 2.97 & 6.51 \\
+\texttt{elast:41:0.45:1} & 1200 & 37.87 & 800 & 38.32 & \textbf{0.99} & \texttt{nodal.5} & 69 & 4.24 & 8.00 \\
+\texttt{elast:33:0.3:1e4} & 1200 & 失败 & 1200 & 失败 & 8.00 & \texttt{nodal.5} & 1000 & 26.56 & 8.00 \\
+\texttt{graph:ws:200000:1} & 21 & 0.57 & 24 & 1.43 & \textbf{0.40} & \texttt{fast.9} & 20 & 0.63 & \textbf{0.91} \\
+\texttt{graph:ba:200000:1} & 14 & 0.53 & 10 & 3.74 & \textbf{0.14} & \texttt{fast.9} & 10 & 3.61 & \textbf{0.15} \\
+\texttt{graph:rgg:200000:1} & 28 & 1.1 & 23 & 0.93 & 1.18 & \texttt{fast.25} & 23 & 0.93 & 1.18 \\
+\texttt{g3t:64:2e-11:2e-4} & 25 & 2.54 & 30 & 2.27 & 1.12 & \texttt{fast.25} & 30 & 2.27 & 1.12 \\
+\texttt{gen:64:3:2:1:0:2e-2:1} & 34 & 3.08 & 30 & 2.3 & 1.34 & \texttt{fast.25} & 30 & 2.3 & 1.34 \\
+\texttt{mg:32:8:1e2:1e-2:1:7} & 22 & 0.47 & 109 & 2.36 & \textbf{0.20} & \texttt{fast.7} & 109 & 2.35 & \textbf{0.20} \\
+\end{longtable}}
+{\scriptsize\setlength{\tabcolsep}{3pt}
+\begin{longtable}{lrrrrrlrrr}
+\caption{留出集（14）。对 fast.25 的 SCORE: 0.192  胜 6/14；对每例最优的 SCORE: -0.447  胜 3/14；SSR 失败: []}\\
+\toprule
+算例 & SSR & (s) & fast.25 & (s) & 比值 & 最优设置 & 迭代 & (s) & 比值 \\
+\midrule
+\endfirsthead
+\toprule
+算例 & SSR & (s) & fast.25 & (s) & 比值 & 最优设置 & 迭代 & (s) & 比值 \\
+\midrule
+\endhead
+\bottomrule
+\endlastfoot
+\texttt{poisson3d:100} & 25 & 2.63 & 19 & 2.16 & 1.22 & \texttt{fast.25} & 19 & 2.16 & 1.22 \\
+\texttt{rot2d:700:1e-4:60} & 215 & 7.66 & 135 & 6.23 & 1.23 & \texttt{noagg.25} & 20 & 1.43 & 5.38 \\
+\texttt{rot3d:60:1e-3:1e-3} & 83 & 1.83 & 63 & 1.52 & 1.21 & \texttt{fast.7} & 45 & 1.3 & 1.41 \\
+\texttt{fe3d:300000:1e4:5} & 78 & 3.97 & 71 & 4.31 & \textbf{0.92} & \texttt{fast.9} & 55 & 3.46 & 1.15 \\
+\texttt{stretch:60:1000} & 53 & 1.33 & 41 & 1.23 & 1.08 & \texttt{fast.7} & 37 & 1.03 & 1.30 \\
+\texttt{cd2d:700:1e-4:rec} & 16 & 1.11 & 28 & 1.28 & \textbf{0.86} & \texttt{noagg.25} & 19 & 1.07 & 1.03 \\
+\texttt{cd2d:512:1e-3:uni} & 14 & 0.53 & 26 & 0.53 & 1.01 & \texttt{noagg.25} & 13 & 0.4 & 1.32 \\
+\texttt{cd3d:80:1e-4} & 14 & 1.4 & 21 & 3.16 & \textbf{0.44} & \texttt{fast.9} & 41 & 1.83 & \textbf{0.77} \\
+\texttt{elast:51:0.4:1} & 1000 & 63.67 & 1000 & 97.45 & \textbf{0.65} & \texttt{nodal.5} & 55 & 6.94 & 8.00 \\
+\texttt{graph:ws:300000:2} & 21 & 0.86 & 23 & 2.35 & \textbf{0.37} & \texttt{fast.9} & 24 & 1.14 & \textbf{0.76} \\
+\texttt{graph:rgg:300000:2} & 31 & 1.75 & 25 & 1.52 & 1.15 & \texttt{fast.25} & 25 & 1.52 & 1.15 \\
+\texttt{gen:64:10:2:1:0:2e-2:5} & 46 & 3.96 & 30 & 2.41 & 1.64 & \texttt{fast.25} & 30 & 2.41 & 1.64 \\
+\texttt{mg:32:4:1e2:1:1:8} & 14 & 0.22 & 26 & 0.48 & \textbf{0.45} & \texttt{fast.25} & 26 & 0.48 & \textbf{0.45} \\
+\texttt{insul} & 26 & 0.65 & 19 & 0.6 & 1.09 & \texttt{fast.7} & 21 & 0.63 & 1.03 \\
+\end{longtable}}
+{\scriptsize\setlength{\tabcolsep}{3pt}
+\begin{longtable}{lrrrrrlrrr}
+\caption{BoomerAMG 弱项集 WEAK（11）。对 fast.25 的 SCORE: 1.919  胜 10/11；对每例最优的 SCORE: 1.420  胜 9/11；SSR 失败: []}\\
+\toprule
+算例 & SSR & (s) & fast.25 & (s) & 比值 & 最优设置 & 迭代 & (s) & 比值 \\
+\midrule
+\endfirsthead
+\toprule
+算例 & SSR & (s) & fast.25 & (s) & 比值 & 最优设置 & 迭代 & (s) & 比值 \\
+\midrule
+\endhead
+\bottomrule
+\endlastfoot
+\texttt{cdmix:512:1e-5:1} & 32 & 0.75 & 65 & 1.34 & \textbf{0.56} & \texttt{noagg.25} & 20 & 0.6 & 1.25 \\
+\texttt{cdmix:512:1e-3:2} & 33 & 0.85 & 38 & 0.77 & 1.11 & \texttt{noagg.25} & 20 & 0.63 & 1.35 \\
+\texttt{cd3m:64:1e-4:4} & 18 & 0.76 & 31 & 1.44 & \textbf{0.53} & \texttt{air.2} & 31 & 1.1 & \textbf{0.69} \\
+\texttt{cd3d:64:1e-5} & 14 & 0.62 & 21 & 1.54 & \textbf{0.40} & \texttt{air.1} & 29 & 0.72 & \textbf{0.87} \\
+\texttt{markov:ba:200000:0.99:1} & 18 & 0.87 & 69 & 1.93 & \textbf{0.45} & \texttt{fast.5} & 60 & 1.49 & \textbf{0.58} \\
+\texttt{markov:ws:200000:0.999:1} & 25 & 1.04 & 271 & 12.59 & \textbf{0.08} & \texttt{fast.9} & 272 & 5.67 & \textbf{0.18} \\
+\texttt{dlap:ba:200000:1} & 28 & 1.12 & 127 & 7.01 & \textbf{0.16} & \texttt{air.1} & 197 & 3.77 & \textbf{0.30} \\
+\texttt{dlap:ws:200000:1} & 28 & 1.14 & 400 & 7.4 & \textbf{0.15} & \texttt{fast.7} & 400 & 7.29 & \textbf{0.16} \\
+\texttt{mg:32:16:1e2:1e-2:1:3} & 23 & 0.82 & 127 & 5.28 & \textbf{0.15} & \texttt{sys.n} & 127 & 3.18 & \textbf{0.26} \\
+\texttt{mg:32:8:1e3:1e-3:0:4} & 11 & 0.2 & 1200 & 21.86 & \textbf{0.01} & \texttt{sys.u} & 1200 & 14.42 & \textbf{0.01} \\
+\texttt{graph:ba:300000:3} & 15 & 0.84 & 10 & 6.96 & \textbf{0.12} & \texttt{fast.9} & 10 & 6.75 & \textbf{0.12} \\
+\end{longtable}}
+{\scriptsize\setlength{\tabcolsep}{3pt}
+\begin{longtable}{lrrrrrlrrr}
+\caption{弱项留出 WEAK\_HOLD（6，曾用于找 bug）。对 fast.25 的 SCORE: 1.606  胜 6/6；对每例最优的 SCORE: 1.347  胜 5/6；SSR 失败: []}\\
+\toprule
+算例 & SSR & (s) & fast.25 & (s) & 比值 & 最优设置 & 迭代 & (s) & 比值 \\
+\midrule
+\endfirsthead
+\toprule
+算例 & SSR & (s) & fast.25 & (s) & 比值 & 最优设置 & 迭代 & (s) & 比值 \\
+\midrule
+\endhead
+\bottomrule
+\endlastfoot
+\texttt{cdmix:700:1e-4:7} & 38 & 1.75 & 43 & 1.76 & \textbf{0.99} & \texttt{noagg.25} & 20 & 1.16 & 1.51 \\
+\texttt{cd3m:72:1e-5:9} & 18 & 1.06 & 34 & 2.14 & \textbf{0.49} & \texttt{air.2} & 34 & 1.65 & \textbf{0.64} \\
+\texttt{markov:ba:300000:0.995:5} & 23 & 1.48 & 112 & 4.64 & \textbf{0.32} & \texttt{air.1} & 134 & 3.45 & \textbf{0.43} \\
+\texttt{dlap:ws:300000:6} & 113 & 5.56 & 398 & 11.4 & \textbf{0.49} & \texttt{fast.9} & 382 & 10.44 & \textbf{0.53} \\
+\texttt{mg:32:12:3e2:3e-3:1:11} & 24 & 0.57 & 400 & 12.0 & \textbf{0.05} & \texttt{sys.u} & 315 & 7.06 & \textbf{0.08} \\
+\texttt{graph:ba:250000:8} & 15 & 0.67 & 10 & 5.13 & \textbf{0.13} & \texttt{fast.7} & 10 & 5.03 & \textbf{0.13} \\
+\end{longtable}}
+{\scriptsize\setlength{\tabcolsep}{3pt}
+\begin{longtable}{lrrrrrlrrr}
+\caption{弱项干净留出 WEAK\_HOLD2（9）。对 fast.25 的 SCORE: 2.133  胜 9/9；对每例最优的 SCORE: 1.764  胜 8/9；SSR 失败: []}\\
+\toprule
+算例 & SSR & (s) & fast.25 & (s) & 比值 & 最优设置 & 迭代 & (s) & 比值 \\
+\midrule
+\endfirsthead
+\toprule
+算例 & SSR & (s) & fast.25 & (s) & 比值 & 最优设置 & 迭代 & (s) & 比值 \\
+\midrule
+\endhead
+\bottomrule
+\endlastfoot
+\texttt{cdmix:600:1e-5:13} & 39 & 1.22 & 58 & 1.7 & \textbf{0.72} & \texttt{noagg.25} & 21 & 0.88 & 1.38 \\
+\texttt{cd3m:60:1e-3:21} & 17 & 0.67 & 26 & 1.1 & \textbf{0.61} & \texttt{air.2} & 30 & 0.88 & \textbf{0.77} \\
+\texttt{markov:ws:250000:0.9999:17} & 31 & 1.58 & 600 & 36.88 & \textbf{0.04} & \texttt{fast.9} & 600 & 15.87 & \textbf{0.10} \\
+\texttt{markov:rgg:200000:0.99:3} & 17 & 1.25 & 66 & 1.9 & \textbf{0.66} & \texttt{fast.9} & 72 & 1.86 & \textbf{0.67} \\
+\texttt{dlap:ba:300000:19} & 27 & 1.64 & 149 & 13.8 & \textbf{0.12} & \texttt{fast.9} & 149 & 5.63 & \textbf{0.29} \\
+\texttt{dlap:rgg:200000:23} & 28 & 1.69 & 400 & 8.97 & \textbf{0.19} & \texttt{fast.9} & 400 & 8.74 & \textbf{0.19} \\
+\texttt{mg:32:24:1e2:1e-2:1:29} & 23 & 1.17 & 152 & 9.55 & \textbf{0.12} & \texttt{sys.n} & 152 & 5.52 & \textbf{0.21} \\
+\texttt{mg:24:8:3e3:3e-3:0:31} & 5 & 0.06 & 600 & 4.41 & \textbf{0.01} & \texttt{sys.n} & 1000 & 2.95 & \textbf{0.02} \\
+\texttt{graph:ba:400000:37} & 14 & 1.19 & 10 & 10.62 & \textbf{0.11} & \texttt{fast.9} & 10 & 10.15 & \textbf{0.12} \\
+\end{longtable}}

@@ -1,0 +1,3 @@
+libfluxmg.dylib
+__pycache__/
+structured/libhypre_struct.dylib

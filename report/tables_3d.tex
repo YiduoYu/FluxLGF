@@ -1,0 +1,148 @@
+\begin{table}[H]\centering\small
+\caption{三维：PCG 迭代次数（$\chi\in\{10^2,10^4,10^6,10^8\}$ 的最小--最大值；$^{\times k}$ 表示有 $k$ 个 $\chi$ 在 500 次内未收敛）}\label{tab:its3d}
+\begin{adjustbox}{max width=\textwidth}
+\begin{tabular}{llcccccc}
+\toprule
+算例 & $n$ & 传统 LGF & GMG & BoomerAMG & 方法二 & M2 $w{=}\frac1{32}$ & M2 $w{=}\frac1{64}$ \\
+\midrule
+A: $\chi^x$ & 31 & 68--500$^{\times2}$ & 8--9 & 5--7 & 2--3 &  &  \\
+ & 63 & 97--500$^{\times3}$ & 9 & 7 & 2--3 &  &  \\
+ & 127 & 111--500$^{\times3}$ & 9 & 7--9 & 2--3 &  &  \\
+\midrule
+B: 阶跃层 & 31 & 20--48 & 9 & 7--8 & 1--3 &  &  \\
+ & 63 & 19--59 & 9 & 9 & 1--3 &  &  \\
+ & 127 & 19--62 & 9 & 10--11 & 1--3 &  &  \\
+\midrule
+C: $\chi^x$+规则夹杂 & 31 & 500$^{\times4}$ & 57--62 & 11 &  & 12 & 12 \\
+ & 63 & 500$^{\times4}$ & 75--89 & 12--14 &  & 11 & 15--16 \\
+ & 127 & 500$^{\times4}$ & 89--103 & 14--15 &  & 10 & 13--14 \\
+\midrule
+D: $\chi^x$+随机夹杂 & 31 & 500$^{\times4}$ & 70--88 & 13--14 &  & 12--13 & 12--13 \\
+ & 63 & 500$^{\times4}$ & 100--107 & 15--16 &  & 12 & 17 \\
+ & 127 & 500$^{\times4}$ & 123--135 & 15--17 &  & 11 & 16 \\
+\bottomrule
+\end{tabular}
+\end{adjustbox}
+\end{table}
+
+\begin{table}[H]\centering\small
+\caption{三维：误差 $\|u_k-u_h\|/\|u_h\|\le10^{-8}$ 所需迭代数（各 $\chi$ 的范围；--：300 次内未达到）}\label{tab:k83d}
+\begin{adjustbox}{max width=\textwidth}
+\begin{tabular}{llcccccc}
+\toprule
+算例 & $n$ & 传统 LGF & GMG & BoomerAMG & 方法二 & M2 $w{=}\frac1{32}$ & M2 $w{=}\frac1{64}$ \\
+\midrule
+A: $\chi^x$ & 31 & 54--244 & 6--8 & 5 & 2--3 &  &  \\
+ & 63 & 65 & 6--7 & 5--6 & 2--3 &  &  \\
+ & 127 & 70 & 6--7 & 6--8 & 2--3 &  &  \\
+\midrule
+B: 阶跃层 & 31 & 12--80 & 6 & 6 & 3 &  &  \\
+ & 63 & 12--85 & 6 & 7--8 & 3 &  &  \\
+ & 127 & 12--87 & 5 & 8--9 & 3 &  &  \\
+\midrule
+C: $\chi^x$+规则夹杂 & 31 & -- & 64--67 & 10--11 &  & 13--14 & 13--14 \\
+ & 63 & -- & 84--86 & 11--14 &  & 12--14 & 15--18 \\
+ & 127 & -- & 99--100 & 13--14 &  & 10--13 & 14--16 \\
+\midrule
+D: $\chi^x$+随机夹杂 & 31 & -- & 80--86 & 12--14 &  & 13--15 & 13--15 \\
+ & 63 & -- & 104--110 & 13--16 &  & 12--13 & 17--19 \\
+ & 127 & -- & 123--129 & 15 &  & 11--12 & 16--18 \\
+\bottomrule
+\end{tabular}
+\end{adjustbox}
+\end{table}
+
+\begin{table}[H]\centering\small
+\caption{三维：按残差规则 $\|r\|/\|f\|\le10^{-10}$ 停止时的代数误差 $\|u-u_h\|/\|u_h\|$（各 $\chi$ 中的最大值）}\label{tab:err3d}
+\begin{adjustbox}{max width=\textwidth}
+\begin{tabular}{llcccccc}
+\toprule
+算例 & $n$ & 传统 LGF & GMG & BoomerAMG & 方法二 & M2 $w{=}\frac1{32}$ & M2 $w{=}\frac1{64}$ \\
+\midrule
+A: $\chi^x$ & 31 & $2.4{\times}10^{-2}$ & $6.1{\times}10^{-9}$ & $1.7{\times}10^{-10}$ & $3.3{\times}10^{-9}$ &  &  \\
+ & 63 & $5.8{\times}10^{-2}$ & $7.1{\times}10^{-11}$ & $1.5{\times}10^{-10}$ & $3.3{\times}10^{-9}$ &  &  \\
+ & 127 & $8.4{\times}10^{-2}$ & $3.2{\times}10^{-11}$ & $1.5{\times}10^{-10}$ & $3.3{\times}10^{-9}$ &  &  \\
+\midrule
+B: 阶跃层 & 31 & $7.3{\times}10^{-7}$ & $3.3{\times}10^{-12}$ & $4.1{\times}10^{-10}$ & $2.0{\times}10^{-4}$ &  &  \\
+ & 63 & $7.5{\times}10^{-7}$ & $8.9{\times}10^{-13}$ & $1.6{\times}10^{-10}$ & $2.0{\times}10^{-4}$ &  &  \\
+ & 127 & $7.5{\times}10^{-7}$ & $3.4{\times}10^{-13}$ & $3.9{\times}10^{-10}$ & $2.0{\times}10^{-4}$ &  &  \\
+\midrule
+C: $\chi^x$+规则夹杂 & 31 & $3.3{\times}10^{-1}$ & $1.0{\times}10^{-7}$ & $3.3{\times}10^{-9}$ &  & $2.7{\times}10^{-7}$ & $2.7{\times}10^{-7}$ \\
+ & 63 & $4.1{\times}10^{-1}$ & $2.2{\times}10^{-7}$ & $1.5{\times}10^{-8}$ &  & $4.5{\times}10^{-7}$ & $3.1{\times}10^{-7}$ \\
+ & 127 & $4.4{\times}10^{-1}$ & $2.9{\times}10^{-7}$ & $2.4{\times}10^{-9}$ &  & $2.5{\times}10^{-7}$ & $1.2{\times}10^{-7}$ \\
+\midrule
+D: $\chi^x$+随机夹杂 & 31 & $5.4{\times}10^{-1}$ & $3.0{\times}10^{-7}$ & $6.6{\times}10^{-9}$ &  & $7.0{\times}10^{-8}$ & $7.0{\times}10^{-8}$ \\
+ & 63 & $6.3{\times}10^{-1}$ & $6.0{\times}10^{-8}$ & $1.3{\times}10^{-8}$ &  & $1.2{\times}10^{-8}$ & $7.9{\times}10^{-8}$ \\
+ & 127 & $6.6{\times}10^{-1}$ & $9.9{\times}10^{-9}$ & $4.4{\times}10^{-9}$ &  & $3.2{\times}10^{-8}$ & $1.7{\times}10^{-7}$ \\
+\bottomrule
+\end{tabular}
+\end{adjustbox}
+\end{table}
+
+\begin{table}[H]\centering\small
+\caption{三维：总时间 setup+solve（$\chi=10^8$，单线程，ms）}\label{tab:time3d}
+\begin{adjustbox}{max width=\textwidth}
+\begin{tabular}{llcccccc}
+\toprule
+算例 & $n$ & 传统 LGF & GMG & BoomerAMG & 方法二 & M2 $w{=}\frac1{32}$ & M2 $w{=}\frac1{64}$ \\
+\midrule
+A: $\chi^x$ & 31 & 745 & 33 & 100 & 5 &  &  \\
+ & 63 & 6.52\,s & 257 & 1.23\,s & 41 &  &  \\
+ & 127 & 47.96\,s & 2.62\,s & 8.86\,s & 335 &  &  \\
+\midrule
+B: 阶跃层 & 31 & 69 & 31 & 119 & 4 &  &  \\
+ & 63 & 698 & 265 & 1.21\,s & 29 &  &  \\
+ & 127 & 5.14\,s & 2.28\,s & 12.80\,s & 229 &  &  \\
+\midrule
+C: $\chi^x$+规则夹杂 & 31 & 688 & 137 & 134 &  & 48 & 67 \\
+ & 63 & 6.25\,s & 1.49\,s & 1.37\,s &  & 503 & 429 \\
+ & 127 & 44.08\,s & 13.50\,s & 10.09\,s &  & 21.21\,s & 9.25\,s \\
+\midrule
+D: $\chi^x$+随机夹杂 & 31 & 710 & 164 & 155 &  & 41 & 42 \\
+ & 63 & 6.29\,s & 1.93\,s & 1.66\,s &  & 369 & 376 \\
+ & 127 & 43.00\,s & 19.73\,s & 11.66\,s &  & 9.80\,s & 6.01\,s \\
+\bottomrule
+\end{tabular}
+\end{adjustbox}
+\end{table}
+
+\begin{table}[H]\centering\small
+\caption{三维：误差降到 $10^{-8}$ 的时间 setup$+k_8\times$单步时间（$\chi=10^8$，ms）}\label{tab:t83d}
+\begin{adjustbox}{max width=\textwidth}
+\begin{tabular}{llcccccc}
+\toprule
+算例 & $n$ & 传统 LGF & GMG & BoomerAMG & 方法二 & M2 $w{=}\frac1{32}$ & M2 $w{=}\frac1{64}$ \\
+\midrule
+A: $\chi^x$ & 31 & -- & 33 & 100 & 5 &  &  \\
+ & 63 & -- & 219 & 1.15\,s & 41 &  &  \\
+ & 127 & -- & 2.25\,s & 8.40\,s & 335 &  &  \\
+\midrule
+B: 阶跃层 & 31 & 115 & 24 & 112 & 10 &  &  \\
+ & 63 & 1.12\,s & 205 & 1.15\,s & 78 &  &  \\
+ & 127 & 7.98\,s & 1.61\,s & 11.56\,s & 611 &  &  \\
+\midrule
+C: $\chi^x$+规则夹杂 & 31 & -- & 153 & 127 &  & 54 & 75 \\
+ & 63 & -- & 1.66\,s & 1.43\,s &  & 576 & 489 \\
+ & 127 & -- & 14.95\,s & 9.66\,s &  & 22.29\,s & 9.99\,s \\
+\midrule
+D: $\chi^x$+随机夹杂 & 31 & -- & 188 & 155 &  & 49 & 50 \\
+ & 63 & -- & 2.07\,s & 1.73\,s &  & 390 & 412 \\
+ & 127 & -- & 19.73\,s & 11.66\,s &  & 10.07\,s & 6.39\,s \\
+\bottomrule
+\end{tabular}
+\end{adjustbox}
+\end{table}
+
+\begin{table}[H]\centering\small
+\caption{三维，算例 A（$n=127$）：相对连续解的总误差 $\|u-u^*\|/\|u^*\|$}\label{tab:aerr三维}
+\begin{tabular}{lcccc}
+\toprule
+$\chi$ & 传统 LGF & GMG & BoomerAMG & 方法二 \\
+\midrule
+$10^{2}$ & $6.3{\times}10^{-5}$ & $6.3{\times}10^{-5}$ & $6.3{\times}10^{-5}$ & $6.3{\times}10^{-5}$ \\
+$10^{4}$ & $4.8{\times}10^{-4}$ & $4.8{\times}10^{-4}$ & $4.8{\times}10^{-4}$ & $4.8{\times}10^{-4}$ \\
+$10^{6}$ & $9.3{\times}10^{-3}$ & $1.3{\times}10^{-3}$ & $1.3{\times}10^{-3}$ & $1.3{\times}10^{-3}$ \\
+$10^{8}$ & $8.5{\times}10^{-2}$ & $2.5{\times}10^{-3}$ & $2.5{\times}10^{-3}$ & $2.5{\times}10^{-3}$ \\
+\bottomrule
+\end{tabular}
+\end{table}

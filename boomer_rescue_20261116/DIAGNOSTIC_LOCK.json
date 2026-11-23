@@ -1,0 +1,101 @@
+{
+  "purpose": "Exploratory check after observing 2047 scaling deterioration. Change only Ritz budget 32 to 96; no inclusion in locked validation or headline speedup.",
+  "jobs": [
+    {
+      "fam": "circ",
+      "n": 2047,
+      "chi": 100000.0,
+      "p": [
+        0.4190123005901981,
+        0.4158784377138496,
+        0.21908541227786188
+      ],
+      "rhs": 1,
+      "method": "lift",
+      "cfg": "base",
+      "basis": "weighted",
+      "source": "ritz",
+      "m": 1,
+      "steps": 96,
+      "div": 4,
+      "smooth": 0,
+      "pilot": 12,
+      "gate": 0.1,
+      "tag": "rescue96_posthoc",
+      "rep": 0,
+      "bins": 384
+    },
+    {
+      "fam": "disk",
+      "n": 2047,
+      "chi": 100000.0,
+      "p": [
+        0.4190123005901981,
+        0.4158784377138496,
+        0.21908541227786188
+      ],
+      "rhs": 1,
+      "method": "lift",
+      "cfg": "base",
+      "basis": "weighted",
+      "source": "ritz",
+      "m": 1,
+      "steps": 96,
+      "div": 4,
+      "smooth": 0,
+      "pilot": 12,
+      "gate": 0.1,
+      "tag": "rescue96_posthoc",
+      "rep": 0,
+      "bins": 384
+    },
+    {
+      "fam": "circ",
+      "n": 2047,
+      "chi": 100000.0,
+      "p": [
+        0.4190123005901981,
+        0.4158784377138496,
+        0.21908541227786188
+      ],
+      "rhs": 1,
+      "method": "lift",
+      "cfg": "base",
+      "basis": "weighted",
+      "source": "ritz",
+      "m": 1,
+      "steps": 96,
+      "div": 4,
+      "smooth": 0,
+      "pilot": 12,
+      "gate": 0.1,
+      "tag": "rescue96_posthoc",
+      "rep": 1,
+      "bins": 384
+    },
+    {
+      "fam": "disk",
+      "n": 2047,
+      "chi": 100000.0,
+      "p": [
+        0.4190123005901981,
+        0.4158784377138496,
+        0.21908541227786188
+      ],
+      "rhs": 1,
+      "method": "lift",
+      "cfg": "base",
+      "basis": "weighted",
+      "source": "ritz",
+      "m": 1,
+      "steps": 96,
+      "div": 4,
+      "smooth": 0,
+      "pilot": 12,
+      "gate": 0.1,
+      "tag": "rescue96_posthoc",
+      "rep": 1,
+      "bins": 384
+    }
+  ]
+}

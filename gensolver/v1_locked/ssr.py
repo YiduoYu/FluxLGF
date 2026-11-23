@@ -1,0 +1,94 @@
+"""Python front of SSR (ssr.c). Input: a CSR matrix only. Levers are the module constants; eval reads them unchanged across all classes."""
+import ctypes as C
+from pathlib import Path
+
+import numpy as np
+
+HERE = Path(__file__).resolve().parent
+
+# levers
+NU = 1            # smoothing sweeps pre and post on smoothed levels
+EVERY = 2         # smooth every EVERY-th level (reduction halves the unknowns, so 2 levels are about one classic coarsening)
+NS = 1            # samples per clique vertex
+PIV = 1e-2        # pivot acceptance |a_kk| >= PIV sum |a_kj|
+THETA = 0.25      # edges below THETA max do not block F (0: strict independent set)
+DEG_PRIO = 1      # eliminate low degree first
+COARSE = 300      # direct solve at or below this size
+TOPK = 0          # 1: deterministic control, largest partner instead of a random one
+SWEEPS_T = 0      # sweeps for the near-kernel vector; 0: constant, as in approximate Cholesky
+SWEEPS_SYM = 0    # 1: also relax the near-kernel vector on symmetric matrices
+FLOOR = 1e-3      # smallest |t_i| / max |t|
+GUARD = 0.0       # diagonal floor as a fraction of the exact Schur diagonal
+COUPLE = 1        # 1: transport-plan sampling (exact row and column sums); 0: independent samples
+DROP = 0.0        # coarse entries below DROP sqrt(d_i d_j) go to the diagonal, keeping the row sum
+LUMP = 1          # lump same-sign off-diagonals to the diagonal before elimination
+SEED = 1
+
+_lib = C.CDLL(str(HERE / "libssr.dylib"))
+_d = C.POINTER(C.c_double)
+_i = C.POINTER(C.c_int)
+_lib.ssr_setup.restype = C.c_void_p
+_lib.ssr_setup.argtypes = [C.c_int, _i, _i, _d, _d, _d, C.c_int, C.c_int, C.c_int, C.c_double, C.c_double, C.c_int, C.c_int, C.c_int, C.c_uint64, C.c_int]
+_lib.ssr_apply.argtypes = [C.c_void_p, _d, _d]
+_lib.ssr_stats.argtypes = [C.c_void_p, _d]
+_lib.ssr_free.argtypes = [C.c_void_p]
+_lib.ssr_level_info.argtypes = [C.c_void_p, C.c_int, _i]
+
+
+def _dp(x):
+    return x.ctypes.data_as(_d)
+
+
+def near_kernel(A, sweeps):
+    """Symmetric Gauss-Seidel sweeps on A t = 0 from the constant vector, without noise: noise survives in weakly coupled regions."""
+    n = A.shape[0]
+    t = np.ones(n)
+    if sweeps:
+        import pyamg.relaxation.relaxation as R
+        for _ in range(sweeps):
+            R.gauss_seidel(A, t, np.zeros(n), iterations=1, sweep="symmetric")
+        t /= np.abs(t).max()
+        small = np.abs(t) < FLOOR
+        t[small] = FLOOR * np.where(t[small] < 0, -1.0, 1.0)
+    return t
+
+
+class SSR:
+    """PETSc python-PC compatible: apply(pc, x, y). Also callable on numpy arrays."""
+
+    def __init__(self, A, **kw):
+        g = globals()
+        p = {k: kw.get(k, g[k]) for k in ("NU", "EVERY", "NS", "PIV", "THETA", "DEG_PRIO", "COARSE", "TOPK", "SWEEPS_T", "SWEEPS_SYM", "SEED", "GUARD", "LUMP", "COUPLE", "DROP")}
+        _lib.ssr_config(C.c_double(p["GUARD"]), C.c_int(p["LUMP"]), C.c_int(p["COUPLE"]), C.c_double(p["DROP"]))
+        A = A.tocsr()
+        A.sort_indices()
+        self.ia, self.ja, self.a = A.indptr.astype(np.int32), A.indices.astype(np.int32), A.data.astype(np.float64)
+        n = A.shape[0]
+        self.n = n
+        # symmetric matrices keep the constant vector; two-sided scaling (the discrete Eulerian scaling) is for nonsymmetric ones
+        self.symmetric = abs(A - A.T).max() <= 1e-10 * abs(A).max()
+        if self.symmetric and not p["SWEEPS_SYM"]:
+            t = y = np.ones(n)
+        else:
+            t = near_kernel(A, p["SWEEPS_T"])
+            y = t if self.symmetric else near_kernel(A.T.tocsr(), p["SWEEPS_T"])
+        self.h = _lib.ssr_setup(n, self.ia.ctypes.data_as(_i), self.ja.ctypes.data_as(_i), _dp(self.a), _dp(t), _dp(y), p["NU"], p["EVERY"], p["NS"], p["PIV"], p["THETA"], p["DEG_PRIO"], p["COARSE"], p["TOPK"], p["SEED"], 0)
+        s = np.zeros(4)
+        _lib.ssr_stats(self.h, _dp(s))
+        self.levels, self.complexity, self.coarse_n, self.transfer = int(s[0]), s[1], int(s[2]), s[3]
+        if self.coarse_n < 0:
+            raise RuntimeError(f"coarsest level too large: {-self.coarse_n}")
+        self.z = np.empty(n)
+
+    def __call__(self, r):
+        r = np.asarray(r, dtype=float)
+        _lib.ssr_apply(self.h, _dp(r), _dp(self.z))
+        return self.z.copy()
+
+    def apply(self, pc, x, y):
+        _lib.ssr_apply(self.h, _dp(x.getArray(readonly=True).astype(float)), _dp(self.z))
+        y.setArray(self.z)
+
+    def __del__(self):
+        if getattr(self, "h", None):
+            _lib.ssr_free(self.h)

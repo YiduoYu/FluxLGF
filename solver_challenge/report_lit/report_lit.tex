@@ -1,0 +1,216 @@
+\documentclass[11pt,a4paper]{ctexart}
+\usepackage[margin=2.2cm]{geometry}
+\usepackage{amsmath,amssymb,booktabs,graphicx,float,xcolor,multirow,hyperref,enumitem}
+\usepackage[section]{placeins}
+\usepackage{xurl}
+\hypersetup{colorlinks=true,linkcolor=blue!50!black,citecolor=blue!50!black,urlcolor=blue!50!black}
+\setlist{itemsep=2pt,topsep=3pt}
+\title{SolverChallenge26\_01：文献调研、对比度来源与新思路}
+\author{温州肯恩大学 \quad Nonlinear Poisson 项目}
+\date{2026 年 11 月 4 日}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+\textbf{一、目前没有公开的最好结果。}第 01 题（三维三温，$128^3$，628 万阶）及往届同类题（SC21\_02、SC23\_02、SC25\_01）都没有公开的最优解报告或迭代数据；本届结果要到 11 月 10 日入围名单、11 月 27--30 日答辩才公布。
+文献中最接近的结果来自应用物理与计算数学研究所（徐小文等）和湘潭大学（舒适、岳孝强等）：二维三温问题上，块 Schur 预条件 GMRES(30) 到 $10^{-7}$ 只需 2--8 步，比整体 AMG（9--100 步）快约 5.5 倍；
+用同一族三维三温矩阵（SC23）的文献使用 80 位扩展精度和 $10^{-12}$ 的容差。
+
+\textbf{二、对比度来自靶丸的冷密壳层。}矩阵是 1/8 对称的靶丸：热核（$r<43$ 格）、冷密壳层（$43<r<54$）、外部。离子导热系数跨过壳层下降约 $10^{19.6}$ 倍，辐射扩散系数下降约 $10^3$ 倍；壳层内三个温度之间的交换系数又比别处大 $10^{3}$--$10^{19}$ 倍。
+热核里离子方程几乎是纯 Neumann 扩散（反应项只占对角元的 $3\times10^{-15}$），被绝热的壳层隔开，形成一个近乎奇异的“孤岛”。
+
+\textbf{三、两个新的关键发现。}(1) 官方评测程序支持 float128 精度的解向量（编译选项 \texttt{SC26\_\allowbreak SOLUTION\_\allowbreak FP128}），用混合精度迭代修正，3 步就让真实残差 $\|b-Ax\|/\|b\|$ 达到 $4.5\times10^{-10}$，此前认为达不到的判据其实可以达到。
+(2) 在真实解上，$T_1$ 对 $T_2$ 方程的反馈只占 $10^{-12}$，电子块的非对角部分只占 $2\times10^{-8}$。因此 $3\times3$ 方程组本质上可以化为“两个标量扩散方程 + 一次对角消元”。据此提出六条新思路，优先级最高的是：混合精度修正 + 电子消元的块三角预条件 + 热核孤岛紧缩。
+\end{abstract}
+
+\tableofcontents
+
+\section{赛题与评测规则}
+\begin{itemize}
+\item \textbf{第 01 题：}激光聚变，辐射流体力学三维三温能量方程；$128^3$ 结构网格，有限体积 7 点格式；6,291,456 阶，52,133,888 个非零元。
+\item \textbf{判据：}$\|r\|_2/\|b\|_2<10^{-4}$ 与 $<10^{-8}$ 两档，每档内存 $\le9$\,GB；端到端时间（分析 + 准备 + 求解，不计读入、格式转换和 CPU--GPU 传输），5 次预热后取 5 次平均。
+\item \textbf{评分：}每档 $\text{score}=(T_{\min}/T_{\text{self}})(10-x)+x$，基础分 $x=1$，每档最多 5 分；解错得 0 分。
+\item \textbf{硬件（单节点）：}Intel Xeon Platinum 8488C 双路 96 核 + 512\,GB；国产 LX2 双路 608 核；或 2 块海光 BW1000 DCU。我们此前的计时都是 Mac 单线程，不能直接与之比较。
+\item \textbf{往届同族题：}SC21\_02、SC23\_02（判据都是 $10^{-10}$）、SC25\_01（$10^{-4}$/3\,GB 与 $10^{-8}$/6\,GB），规模与本题完全相同。
+\end{itemize}
+
+\paragraph{关键：官方程序允许 float128 解向量。}官方示例代码（\href{https://gitee.com/godjs/solverchallenge26_sample_code}{gitee: solverchallenge26\_sample\_code}）在求解后对残差做三次检查：双精度、long double、float128。
+其中 \texttt{include/\allowbreak solverchallenge26/\allowbreak solver\_input.h} 定义了编译选项 \texttt{SC26\_\allowbreak SOLUTION\_\allowbreak FP128}：打开后解向量的类型是 \texttt{\_\_float128}，评测只做 float128 检查。
+这意味着我们在报告 05 中发现的双精度下限（$\sim10^{-2}$，来自解向量本身的舍入）并不是评测的硬限制。\textbf{这个选项是否允许参赛使用，需要向组委会确认}（它在官方代码里，但规则页面没有提到）。
+
+\section{目前最好的结果做到什么样}
+\subsection{竞赛方面：没有公开数据}
+\begin{itemize}
+\item 本届（SC26）结果尚未公布：11 月 10 日公布入围名单，11 月 27--30 日在 SOLVER26 答辩。
+\item 往届最优报告只公开了第 02、03、04、06、08、09、10 题（SC25），\textbf{第 01 题没有}；SC21、SC23 也没有公开各题报告。
+往届获奖队伍名单是公开的（例如 SC25 特等奖“祺德隆东强队”，单项 T1 也由该队获得），但没有迭代数和时间。
+\end{itemize}
+
+\subsection{文献方面}
+\begin{table}[H]
+\centering
+\small
+\begin{tabular}{p{3.2cm}p{3.2cm}p{2.4cm}p{6.2cm}}
+\toprule
+文献 & 问题 & 迭代法与精度 & 结果 \\
+\midrule
+Yue, Zhang, Xu, Shu, Shi（CiCP 2021，arXiv:2002.04958） & 二维靶丸内爆三温/20 群，32,000$\times$24 与 64,000$\times$48 网格 & GMRES(30)，$\|r\|/\|b\|<10^{-7}$ &
+整体 BoomerAMG 9--100 步；PCTL 3--17 步；Schur1 3--4 步；自适应 Schur 2--8 步。三温问题总时间比 AMG 快 5.5 倍、比 PCTL 快 13.7\%。352 核强扩展：自适应 Schur 2--3 步、0.6--0.9\,s，AMG 16--34 步、3.0--4.5\,s。\\
+\addlinespace
+Tian, Huang, Xu（arXiv:2407.15973，2024） & \textbf{SC23 的 RHD3D-3T}，与本题同规模 & PCG + 32 块 Block-Jacobi，$10^{-12}$，\textbf{fp80 工作精度} &
+混合精度（块内 fp32）加速 1.8 倍；三温问题的迭代数未给出（单温问题 628 步）。论文统计该矩阵 11.3\% 的行“多尺度强度”$\ge10^{15}$。\\
+\addlinespace
+Shu, Liu, Xu, Yue, Li（AAMM 2021） & 多维三温，对称保持有限体积元 & AMG 块下/上三角预条件 & 网格无关收敛、并行可扩展（全文未能获取，无具体数字）。\\
+\addlinespace
+Yue, He, Xu, Shu, Wang（CiCP 2022） & 高维三温，靶丸内爆算例 & 按物理量划分的加性/乘性 Schwarz + AMG 子求解 & 稳健、可扩展（全文未能获取）。\\
+\addlinespace
+Xu, Mo（2009）；Hao, Huang, Xu（arXiv:2211.10080） & 三温能量方程 & PCTL：电子温度为粗点、辐射和离子为细点的两层法 & 2022 年给出收敛上界，说明对角占优和耦合强度决定收敛。\\
+\addlinespace
+Xu, Mo（NLAA 2017）；JXPAMG（CCF THPC 2023） & 辐射流体多尺度矩阵 & 界面粗化 AMG & 针对多尺度系数的粗化策略（未取得数字）。\\
+\addlinespace
+Mousseau, Knoll, Rider（JCP 2000） & 非平衡辐射扩散 & JFNK + 基于物理的算子分裂预条件 & 物理分裂 + 多重网格作预条件的经典做法。\\
+\bottomrule
+\end{tabular}
+\caption{文献中的最好结果。可以看到：(1) 主流做法是按物理量分块（Schur/PCTL/Schwarz），每块用 AMG；(2) 同族三维矩阵在文献中要用扩展精度。}
+\end{table}
+
+\subsection{我们自己的基线（Mac 单线程）}
+\begin{table}[H]
+\centering
+\small
+\begin{tabular}{p{5.2cm}rrrp{3.6cm}}
+\toprule
+方法 & 迭代 & 时间 & 真实 $\|b-Ax\|/\|b\|$ & 说明 \\
+\midrule
+BoomerAMG（amg-3d）+ GMRES，自报 $10^{-8}$ & 23 & 18.1\,s & $1.3\times10^{-2}$ & 双精度解，受舍入下限限制 \\
+FD-LGF-real，自报 $10^{-8}$ & 14 & 81.9\,s & $3.8\times10^{-2}$ & 报告 05 \\
+\textbf{混合精度迭代修正}（内层 BoomerAMG，$10^{-6}$） & 19+9+9 & 41.5\,s & $\mathbf{4.5\times10^{-10}}$ & 解向量保存为双双精度（约 32 位有效数字） \\
+\bottomrule
+\end{tabular}
+\caption{迭代修正每一步：第 1 步 $1.3\times10^{-2}$（与双精度解相同），第 2 步 $5.3\times10^{-6}$（已满足 $10^{-4}$），第 3 步 $4.5\times10^{-10}$（满足 $10^{-8}$）。
+如果把同一个解舍入回双精度，残差又回到 $6\times10^{-3}$，说明下限完全来自解向量的表示精度。时间含 Python 中的双双精度残差计算，C 实现会更快。}
+\end{table}
+
+\section{对比度产生在什么地方}
+\subsection{物理模型与三个未知量}
+文献给出的三温能量方程（Xu, Mo 2009）：
+\begin{align*}
+\partial_t E_R-\nabla\cdot\Big(\tfrac{c\lambda(E_R)}{\kappa_R}\nabla E_R\Big)&=c\big(B(T_e)-E_R\big),\\
+\rho C_{V_e}\partial_t T_e-\nabla\cdot(D_e\nabla T_e)&=\omega_{ei}(T_i-T_e)-c\big(B(T_e)-E_R\big),\\
+\rho C_{V_i}\partial_t T_i-\nabla\cdot(D_i\nabla T_i)&=-\omega_{ei}(T_i-T_e).
+\end{align*}
+其中 $\kappa_R$ 是 Rosseland 吸收系数，$\lambda$ 是通量限制子，$D_e,D_i$ 是电子、离子热传导系数，$\omega_{ei}$ 是电子--离子能量交换系数。
+辐射和离子都只与电子耦合；电子--离子耦合对称，辐射--电子耦合不对称（线性化后 $B(T_e)$ 的导数进入一侧）。
+\textbf{对照我们的矩阵：}$T_2$ 是唯一与另两块都耦合的块，$T_2$--$T_3$ 耦合对称，$T_1$--$T_2$ 耦合不对称（$a_{12}/a_{21}\approx10^{12}$），$T_1$ 在远端面有 Robin 边界（辐射的 Marshak 边界）。
+所以 $T_1=$ 辐射能 $E_R$，$T_2=$ 电子温度 $T_e$，$T_3=$ 离子温度 $T_i$（这是根据结构推断的，赛题没有说明）。
+
+\subsection{几何：1/8 靶丸，三层结构}
+\begin{figure}[H]
+\centering
+\includegraphics[width=\linewidth]{radial.png}
+\caption{系数随到原点角距离的变化（$\log_{10}$，深色线为中位数，浅色带为最小--最大）。所有剧烈变化都在 $r\approx43$--$54$ 格的壳层内。
+$T_1$ 浅色带下沿 $10^{-6}$ 来自 $x=0$ 平面上约 500 个异常小的面系数，不代表物理对比度。}
+\label{fig:radial}
+\end{figure}
+\begin{figure}[H]
+\centering
+\includegraphics[width=\linewidth]{../report_real/structure.png}
+\caption{$z=0$ 截面（取自报告 05）：左下角的环就是壳层。}
+\end{figure}
+
+\begin{table}[H]
+\centering
+\small
+\begin{tabular}{lccc}
+\toprule
+ & 热核 $r<43$ & 壳层 $43<r<54$ & 外部 $r>54$ \\
+\midrule
+$T_1$ 辐射扩散系数（面系数中位数） & $10^{10}$ & $1.4\times10^{7}$ & $6\times10^{9}$ \\
+$T_3$ 离子导热系数 & $3\times10^{16}$ & $7\times10^{-4}$ & $3\times10^{11}$ \\
+$T_2$ 电子对角元 & $5\times10^{2}$ & $4.5\times10^{6}$ & $48$ \\
+电子--离子交换 $|a_{23}|$ & $\sim10^{-13}$ & $4.5\times10^{6}$ & $\sim10^{-11}$ \\
+辐射行中的电子耦合 $|a_{12}|$ & $9.6\times10^{2}$ & $1.8\times10^{6}$ & $9.6\times10^{2}$ \\
+反应项/对角元：$T_1$ & $1.6\times10^{-8}$ & $2\times10^{-2}$ & $2.7\times10^{-8}$ \\
+反应项/对角元：$T_3$ & $\mathbf{2.8\times10^{-15}}$ & $1.0$ & $9.7\times10^{-11}$ \\
+\bottomrule
+\end{tabular}
+\caption{三层的系数（“反应项”指对角元减去块内非对角元绝对值之和，即热容/时间步与跨块交换的部分）。}
+\end{table}
+
+\subsection{三种对比度}
+\begin{enumerate}
+\item \textbf{空间跳跃（壳层两侧）。}离子导热从热核的 $3\times10^{16}$ 降到壳层的 $7\times10^{-4}$，跨 19.6 个数量级；辐射扩散降约 $10^{3}$ 倍。
+物理上，壳层是冷而密的烧蚀层/燃料壳：密度大、温度低，所以导热和辐射扩散系数小（常见模型中 $D\propto T^{5/2}$，$\kappa_R$ 随密度增大）；交换系数随密度平方增长，所以壳层内交换最强。
+\item \textbf{扩散与反应之间（近奇异的孤岛）。}热核里 $T_3$ 的反应项只有对角元的 $2.8\times10^{-15}$，在双精度下只相当于十几个舍入单位：
+离子方程在热核里几乎是纯 Neumann 扩散，又被导热系数只有 $7\times10^{-4}$ 的壳层隔开。于是“热核上取常数”的向量几乎在零空间里，对应一个极小的特征值。
+这同时解释了双精度残差下限（对角元 $1.8\times10^{17}$ 的行几乎完全抵消）和各类光滑/局部方法的困难。$T_1$ 在热核和外部也是近纯扩散（$10^{-8}$）。
+\item \textbf{三个物理量之间。}在真实解 $x$ 上测得：$\|A_{21}x_1\|/\|A_{22}x_2\|=9.3\times10^{-13}$（辐射几乎不反馈到电子方程），
+电子块内的扩散部分只占 $2\times10^{-8}$（电子块几乎是对角阵），而 $\|A_{12}x_2\|\approx\|A_{11}x_1\|\approx10^{5}\gg\|b_1\|=10^{-5}$（辐射完全由电子驱动）。
+\end{enumerate}
+
+\subsection{对“自己做离散”的含义}
+要复现这类矩阵，离散模型应包含：1/8 对称靶丸（$x,y,z=0$ 为对称面）、三层材料（热核/冷密壳层/外部，壳层约 11 格厚）、温度与密度相关的系数（使壳层导热低 $10^{3}$--$10^{20}$ 倍、交换强 $10^{3}$ 倍以上）、
+辐射远端面 Robin 边界、向后 Euler 时间离散 + 系数冻结线性化 + 格心有限体积 7 点格式（面系数取调和平均）。
+上表的数值可作为参数目标；时间步长决定反应项大小，因而决定孤岛有多“奇异”，应作为扫描参数。
+
+\section{新的可能办法}
+按“预期收益/实现成本”排序。前三条都有文献依据，也有我们在真实矩阵上的数值证据；都还需要先锁定方案再测试。
+
+\paragraph{1. 混合精度迭代修正 + float128 解（已验证可行）。}
+依据：Carson \& Higham（SISC 2018）三精度迭代修正；Tian 等（2024）对同族矩阵采用 fp80 工作精度；官方代码的 \texttt{SC26\_\allowbreak SOLUTION\_\allowbreak FP128}。
+做法：内层用双精度（甚至单精度）预条件求解修正方程 $Ad=r$，外层用 float128 计算 $r=b-Ax$ 并累加 $x$。
+\textbf{实测 3 步达到 $4.5\times10^{-10}$}（表 2），这是满足官方 $\|b-Ax\|/\|b\|$ 判据的唯一已知途径。内层每步只需 $10^{-6}$ 精度，可以用便宜的预条件和低精度。需确认规则允许。
+
+\paragraph{2. 电子消元的块三角预条件（把问题化为两个标量方程）。}
+依据：块三角/Schur 预条件（Shu 等 2021；Yue 等 2021）是文献中最快的一类；我们测得 $A_{21}$ 的作用只有 $10^{-12}$，电子块非对角只有 $2\times10^{-8}$。
+做法：(a) 忽略 $A_{21}$，先解 $[T_2,T_3]$，再解 $A_{11}x_1=b_1-A_{12}x_2$；(b) 用对角的 $A_{22}$ 消去 $T_2$，得到离子温度的标量方程
+$S_3=A_{33}-A_{32}D_{22}^{-1}A_{23}$，它仍是对称 7 点格式。整个预条件 = 两个标量 SPD 扩散求解（$S_3$ 和 $A_{11}$）+ 两次对角运算。
+预期外层 GMRES 只需 2--3 步，剩下的难度全部集中在 $S_3$（离子导热，$10^{19.6}$ 对比度 + 孤岛）。
+注意：壳层中 $a_{33}\approx|a_{23}|$，直接相减会严重抵消；应按“反应项”形式 $r_3+|a_{23}|r_2/(|a_{23}|+r_2)$ 构造 $S_3$ 的对角元。
+这与报告 05 中失败的 split-sym/pctl 不同：那两个是按替代矩阵设计的，没有利用单向耦合和电子块近似对角这两个事实。
+
+\paragraph{3. 热核孤岛紧缩（deflation）。}
+依据：Vuik, Segal, Meijerink（JCP 1999）证明对角缩放后，极端小特征值的个数等于高导系数层的个数，并用紧缩消除；Aksoylu \& Yeter 对格心有限体积给出同样结论（个数 = 孤立高扩散岛的个数）。
+做法：取热核上的指示向量（$T_3$ 与 $T_1$ 各一个，必要时外部再加一个）作为紧缩空间，加到第 2 条的标量求解器上（或任何预条件上）。
+预期：消除孤岛对应的近零特征值，减少迭代并改善双精度下的稳定性。成本只有几个向量。
+
+\paragraph{4. FD-LGF 用在“高导区 + 常系数”上。}
+依据：Aksoylu, Graham, Klie, Scheichl（2008）证明对比度足够高时，高导区子块的逆可以用常系数问题的求解近似；我们的矩阵中热核和外部恰好都是常系数。
+做法：在第 2 条的 $S_3$ 上用 FD-LGF——热核/外部用 FDM（快速对角化）背景逆，只在壳层（约 11 格厚）做局部精确解。
+与报告 05 相比，局部 LU 只针对一个标量场（未知量减为 1/3），且背景改为分区常系数，预计设置时间大幅下降。这是 FD-LGF 在本题上最有希望的用法。
+
+\paragraph{5. 界面粗化 AMG / PCTL / MGR。}
+依据：Xu \& Mo（NLAA 2017）界面粗化；Xu \& Mo（2009）PCTL；hypre 的 MGR 框架（Bui 等，SISC 2020）可以按物理量顺序做代数约化。可作为第 2 条中标量求解器的替代或对照。
+
+\paragraph{6. 低精度内层 + 多核。}
+依据：Tian 等（2024）块内 fp32 加速 1.8 倍。与第 1 条结合，内层预条件可以整体用 fp32；比赛机器有 96 核，最终要做并行实现。
+
+\section{建议的下一步}
+\begin{enumerate}
+\item 向组委会确认 \texttt{SC26\_\allowbreak SOLUTION\_\allowbreak FP128} 是否可用（决定第 1 条能否计分）。
+\item 锁定方案后测试第 2 条（电子消元块三角预条件），预测：外层 GMRES $\le3$ 步，且总时间低于 BoomerAMG。
+\item 在第 2 条的 $S_3$ 上依次加入第 3 条（孤岛紧缩）和第 4 条（FD-LGF），分别比较迭代数与时间。
+\item 按第 3.4 节搭建自己的三温离散，扫描壳层对比度和时间步长，检验上述方法的稳健性。
+\end{enumerate}
+
+\section*{参考文献与链接}
+\sloppy
+\begin{enumerate}[label={[\arabic*]},itemsep=1pt]\small
+\item SolverChallenge26 赛题页：\url{https://www.solver-conference.cn/solverchallenge26/}；往届：\url{https://www.solver-conference.cn/solverchallenge25/}、\url{https://www.solver-conference.cn/solverchallenge23/}、\url{https://solver-conference.cn/solverchallenge21/}；获奖名单：\url{https://www.solver-conference.cn/solverchallenge26/awards.html}
+\item 官方示例代码：\url{https://gitee.com/godjs/solverchallenge26_sample_code}
+\item X. Yue, S. Zhang, X. Xu, S. Shu, W. Shi, Algebraic multigrid block preconditioning for multi-group radiation diffusion equations, CiCP 29(3), 2021；\url{https://arxiv.org/abs/2002.04958}
+\item S. Shu, M. Liu, X. Xu, X. Yue, S. Li, Algebraic multigrid block triangular preconditioning for multidimensional three-temperature radiation diffusion equations, AAMM 13(5):1203--1226, 2021；\url{https://www.global-sci.com/aamm/article/view/5131}
+\item X. Yue, J. He, X. Xu, S. Shu, L. Wang, Two physics-based Schwarz preconditioners for three-temperature radiation diffusion equations in high dimensions, CiCP 32(3):829--849, 2022；\url{https://www.global-sci.com/cicp/article/view/7101}
+\item X. Xu, Z. Mo, An algebraic two-level preconditioning strategy for solving radiation diffusion systems, Preconditioning 2009 摘要；\url{https://www.math.hkbu.edu.hk/precond09/abstracts/xu_x.pdf}
+\item Y. Hao, S. Huang, X. Xu, Convergence estimation and characteristic analysis of a two-level iterative algorithm for the discretized three-temperature energy linear systems, \url{https://arxiv.org/abs/2211.10080}
+\item X. Xu, Z. Mo, Algebraic interface-based coarsening AMG preconditioner for multi-scale sparse matrices with applications to radiation hydrodynamics computation, NLAA 24(2), 2017, doi:10.1002/nla.2078
+\item X. Xu et al., JXPAMG: a parallel algebraic multigrid solver for extreme-scale numerical simulations, CCF THPC 5:72--83, 2023
+\item Tian, Huang, Xu, Mixed precision block-Jacobi preconditioner: algorithms, performance evaluation and feature analysis, \url{https://arxiv.org/abs/2407.15973}
+\item E. Carson, N. J. Higham, Accelerating the solution of linear systems by iterative refinement in three precisions, SISC 40(2):A817--A847, 2018
+\item C. Vuik, A. Segal, J. A. Meijerink, An efficient preconditioned CG method for the solution of a class of layered problems with extreme contrasts in the coefficients, JCP 152:385--403, 1999
+\item B. Aksoylu, I. G. Graham, H. Klie, R. Scheichl, Towards a rigorously justified algebraic preconditioner for high-contrast diffusion problems, Comput. Visual Sci. 11:319--331, 2008；B. Aksoylu, Y. Yeter, \url{https://arxiv.org/abs/0904.1885}
+\item V. A. Mousseau, D. A. Knoll, W. J. Rider, Physics-based preconditioning and the Newton--Krylov method for non-equilibrium radiation diffusion, JCP 160(2):743--765, 2000
+\item Q. M. Bui, D. Osei-Kuffuor, N. Castelletto, J. A. White, A scalable multigrid reduction framework for multiphase poromechanics of heterogeneous media, SISC 42(2):B379--B396, 2020
+\end{enumerate}
+\end{document}

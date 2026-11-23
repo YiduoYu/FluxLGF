@@ -1,0 +1,118 @@
+[
+  {
+    "fam": "ellipse",
+    "method": "amg",
+    "cfg": "p8",
+    "tag": "p8",
+    "rep": 1
+  },
+  {
+    "fam": "ellipse",
+    "method": "amg",
+    "cfg": "p8",
+    "tag": "p8",
+    "rep": 0
+  },
+  {
+    "fam": "two_vortices",
+    "method": "lift",
+    "cfg": "base",
+    "basis": "weighted",
+    "source": "ritz",
+    "m": 1,
+    "steps": 32,
+    "div": 4,
+    "smooth": 0,
+    "pilot": 12,
+    "gate": 0.1,
+    "tag": "rescue",
+    "rep": 0
+  },
+  {
+    "fam": "ellipse",
+    "method": "lift",
+    "cfg": "base",
+    "basis": "weighted",
+    "source": "ritz",
+    "m": 1,
+    "steps": 32,
+    "div": 4,
+    "smooth": 0,
+    "pilot": 12,
+    "gate": 0.1,
+    "tag": "rescue",
+    "rep": 1
+  },
+  {
+    "fam": "two_vortices",
+    "method": "lift",
+    "cfg": "base",
+    "basis": "weighted",
+    "source": "ritz",
+    "m": 1,
+    "steps": 32,
+    "div": 4,
+    "smooth": 0,
+    "pilot": 12,
+    "gate": 0.1,
+    "tag": "rescue",
+    "rep": 1
+  },
+  {
+    "fam": "ellipse",
+    "method": "amg",
+    "cfg": "base",
+    "tag": "base",
+    "rep": 1
+  },
+  {
+    "fam": "two_vortices",
+    "method": "amg",
+    "cfg": "base",
+    "tag": "base",
+    "rep": 1
+  },
+  {
+    "fam": "ellipse",
+    "method": "amg",
+    "cfg": "base",
+    "tag": "base",
+    "rep": 0
+  },
+  {
+    "fam": "two_vortices",
+    "method": "amg",
+    "cfg": "p8",
+    "tag": "p8",
+    "rep": 0
+  },
+  {
+    "fam": "ellipse",
+    "method": "lift",
+    "cfg": "base",
+    "basis": "weighted",
+    "source": "ritz",
+    "m": 1,
+    "steps": 32,
+    "div": 4,
+    "smooth": 0,
+    "pilot": 12,
+    "gate": 0.1,
+    "tag": "rescue",
+    "rep": 0
+  },
+  {
+    "fam": "two_vortices",
+    "method": "amg",
+    "cfg": "base",
+    "tag": "base",
+    "rep": 0
+  },
+  {
+    "fam": "two_vortices",
+    "method": "amg",
+    "cfg": "p8",
+    "tag": "p8",
+    "rep": 1
+  }
+]

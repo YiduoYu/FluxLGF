@@ -1,0 +1,5 @@
+{"check": "lift", "symmetry": 3.236875439996104e-16, "min_eigenvalue": 9.710904168572093e-07, "direct_error": 1.8112294270858947e-12, "iterations": 8}
+{"check": "weighted", "symmetry": 3.6945355790624756e-16, "min_eigenvalue": 9.71389277336306e-07, "direct_error": 2.144351127376871e-12, "iterations": 8}
+{"check": "local", "symmetry": 4.712892602874498e-16, "min_eigenvalue": 9.707437392369253e-07, "direct_error": 8.791332639684709e-13, "iterations": 7}
+{"check": "linear", "symmetry": 1.3918573083883207e-16, "min_eigenvalue": 9.70445776069e-07, "direct_error": 4.115370839240825e-12, "iterations": 9}
+{"check": "pilot_continuation", "iterations": 10, "probe_min": 0.3343108794273245}

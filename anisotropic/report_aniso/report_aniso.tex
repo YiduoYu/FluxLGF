@@ -1,0 +1,94 @@
+\documentclass[11pt,a4paper]{ctexart}
+\usepackage[margin=2.2cm]{geometry}
+\usepackage{amsmath,amssymb,booktabs,graphicx,float,xcolor,adjustbox,hyperref}
+\usepackage[section]{placeins}
+\hypersetup{colorlinks=true,linkcolor=blue!50!black,citecolor=blue!50!black,urlcolor=blue!50!black}
+\title{各向异性张量系数：BoomerAMG 变差的例子，以及 FD-LGF 的表现}
+\author{温州肯恩大学 \quad Nonlinear Poisson 项目（H34）}
+\date{2026 年 11 月 3 日}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+H33 表明：标量系数、通量差分得到的 M-矩阵上，BoomerAMG 极其稳健。本报告改用张量系数
+$-\nabla\cdot(K\nabla u)+qu=f$，$K=\chi\,ee^{T}+(I-ee^{T})$（各向异性比 $\chi$），
+标准对称 9 点格式离散。只要 $K_{12}\neq0$，矩阵就有正的非对角元，不再是 M-矩阵。
+\textbf{结论：}(1) 这里确实找到了 BoomerAMG 变差的例子：圆形磁力线（circ）、局部旋转各向异性圆盘（disk）和斜断层带（band）上，
+它的迭代数随网格加密持续增长，$n=1023$、$\chi\ge10^4$ 时分别要 144--241、98--218、56--65 次；常数旋转只是轻微增长（$\le33$ 次）。
+(2) 各向异性局限在小区域（disk、band）时，FD-LGF（各向同性背景 + 各向异性区域上的精确 LU）只要 4--8 次迭代，并且与 $n$ 无关；
+时间在 band 上是 BoomerAMG 的 0.29--0.31 倍，在 disk 上是 0.53--0.66 倍。
+(3) 各向异性遍布全域（rot30、rot45、circ）时，FD-LGF 只有网格对齐的背景可用，条件数 $\sim\chi$，要 95--1000 次迭代，比 BoomerAMG 慢 1.8--6 倍。
+(4) GMG 的迭代数是 BoomerAMG 的 2--5 倍以上。
+预注册的 5 条预测中，1、2、4、5 成立；第 3 条在 band 上成立，在 disk 上时间未达到预测的 0.5 倍。
+\end{abstract}
+
+\section{问题与离散}
+能量形式
+\[
+E(u)=\sum_{x\text{-面}}K_{11}^{f}(\delta_xu)^2+\sum_{y\text{-面}}K_{22}^{f}(\delta_yu)^2+2\sum_{\text{节点}}K_{12}(c_xu)(c_yu)+\sum qu^2 ,
+\]
+面上的值取相邻两节点的算术平均，$c_x,c_y$ 为中心差分；$A=\tfrac12\nabla^2E$ 就是标准对称 9 点格式。
+$K=aI$ 时它与原来的 5 点通量格式逐元一致（已测试）。
+由 $(c_xu)^2\le$ 相邻两个 $(\delta_xu)^2$ 的平均和 $K_{12}^2\le K_{11}K_{22}$，用 Cauchy--Schwarz 可得 $E(u)\ge\sum qu^2$，所以 $A$ 对称正定。
+制造解与 H33 相同：$u^*=\sin\pi x\sin\pi y$，$f=A_hu^*$，$q=1+0.2\cos2\pi x\cos2\pi y$。
+
+\begin{figure}[H]\centering
+\includegraphics[width=\textwidth]{gallery.png}
+\caption{六类系数，蓝色短线是强传导方向 $e$，灰色是各向异性区域（$\chi=10^4$ 示意）。
+aligned 为网格对齐的对照；rot30、rot45 为常数旋转；circ 为绕中心的圆形磁力线（磁化等离子体型，arXiv:2301.13351）；
+disk 为各向同性背景中半径 0.2 的 30° 圆盘；band 为宽 0.04 的 30° 斜断层带，沿带传导强。}
+\end{figure}
+
+\paragraph{方法。}BoomerAMG（PETSc 默认 $\theta=0.25$，以及 $\theta=0.5$）、GMG（$\omega=4/5$）、FD-LGF。
+FD-LGF 的背景取对角张量 $\mathrm{diag}(k_1(x),k_2(x))$，用 DST-$y$ 加三对角-$x$ 精确求逆：
+aligned 的背景就是 $K$ 本身；rot30、rot45、circ 取 $\mathrm{diag}(\overline{K_{11}},\overline{K_{22}})$，没有局部部分；
+disk、band 取各向同性背景 $I$，在各向异性区域外扩宽度为 $w$ 的环后做精确 LU。
+PCG 停止规则 $\|r\|/\|f\|\le10^{-10}$，单线程计时。停止后继续迭代（不计时、不计入迭代数）只记录误差，用来定义 $k_8$。
+
+\section{确认性结果（$n=1023$，约 $10^6$ 未知量）}
+\input{tables_main.tex}
+
+\begin{figure}[H]\centering
+\includegraphics[width=\textwidth]{scaling_1e+04.png}
+\caption{迭代数随 $n$ 的变化（$\chi=10^4$）。BoomerAMG 在 circ、disk、band 上随 $n$ 增长；FD-LGF 在 disk、band 上保持平坦。}
+\end{figure}
+\begin{figure}[H]\centering
+\includegraphics[width=\textwidth]{scaling_1e+06.png}
+\caption{同上，$\chi=10^6$。}
+\end{figure}
+
+\section{预注册预测的检验}
+方案在运行前锁定（哈希 bf86f18d，2026-11-03T13:50:23Z）。$n=511$ 的参考值来自用同一份锁定代码重跑的扫描，其迭代数与第一次扫描逐行相同。
+\begin{enumerate}
+\item \textbf{成立。}BoomerAMG 的迭代数从 $n=511$ 到 $n=1023$：circ 在 $\theta=0.25$ 时为 $96\to144$、$108\to191$，
+在 $\theta=0.5$ 时为 $113\to192$、$128\to241$，都满足 $\ge1.3$ 倍；disk 为 $74\to98$、$85\to136$ 和 $101\to175$、$113\to218$；
+band 为 $47\to56$、$48\to59$ 和 $45\to62$、$46\to65$。circ 在 $\theta=0.25$ 时 $>120$ 次。
+\item \textbf{成立。}aligned 上 FD-LGF 只要 2--3 次，时间是 BoomerAMG 的 0.12--0.13 倍；
+rot30、rot45、circ 上 FD-LGF 的时间是最快 BoomerAMG 的 1.8--8.0 倍（预测 $\ge1.5$ 倍）。
+\item \textbf{部分成立。}disk、band 上 FD-LGF（$w=1/16$）的 $k_8=6$--8，不超过 $n=511$ 时 +1，这部分成立；
+时间在 band 上是 0.29--0.31 倍（成立），在 disk 上是 0.53--0.66 倍，没有达到预测的 $\le0.5$。
+disk 的 LU 区域占网格的 20\%，setup 占了大部分时间；$w=1/64$ 时是 0.36--0.48 倍。
+\item \textbf{成立。}GMG 的迭代数在 aligned 上是 BoomerAMG 的 54--333 倍，在 circ 上是 3.0--3.8 倍，在 disk 上是 4.0--5.4 倍。
+\item \textbf{成立。}$\chi=10^6$ 时 FD-LGF 按残差规则停止，此时代数误差在 disk 上为 $2\times10^{-6}$，在 band 上为 $2\times10^{-7}$；
+再迭代 3 次和 2 次就降到 $10^{-8}$。
+\end{enumerate}
+
+\paragraph{计时说明。}这次确认性运行期间，有其他实验在同时运行（各行记录的 1 分钟负载为 4--14）。
+迭代数不受影响；circ 和 rot45 的部分计时可能偏慢，但两种方法受到的影响相同，不会改变上面的比值结论。
+
+\section{讨论}
+\begin{itemize}
+\item 文献中 AMG 的公认难题确实就在这里：不与网格对齐的各向异性破坏了经典 AMG 的强连接判据（非 M-矩阵），
+插值无法沿弯曲的强方向传递信息，迭代数随 $n$ 增长（arXiv:1610.03154、arXiv:2301.13351、arXiv:2601.04112）。
+\item FD-LGF 的优势与 H31--H33 一致：只要“难”的部分局限在小区域，精确局部 LU 就把它完全吸收，
+剩下的背景用快速变换精确求逆，迭代数与 $n$、$\chi$ 都无关。
+\item 各向异性遍布全域时，Dirichlet 边界下的旋转 9 点算子不能用正弦变换对角化（交叉项与奇延拓不交换），
+FD-LGF 没有可用的精确背景，因此不适用。
+\end{itemize}
+
+\appendix
+\section{迭代数随 $n$ 的完整表格}
+（各表的单元为各方法在该 $(\text{系数},n)$ 下的迭代数。）
+\input{tables_n.tex}
+\end{document}

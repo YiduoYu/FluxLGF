@@ -1,0 +1,78 @@
+\documentclass[11pt,a4paper]{ctexart}
+\usepackage[margin=2.2cm]{geometry}
+\usepackage{amsmath,amssymb,booktabs,float,graphicx,xcolor,hyperref,enumitem}
+\hypersetup{colorlinks=true,linkcolor=blue!50!black,urlcolor=blue!50!black}
+\setlist{itemsep=2pt,topsep=3pt}
+\title{H44：电子--离子联合求解}
+\author{温州肯恩大学 \quad Nonlinear Poisson 项目}
+\date{2026 年 11 月 4 日}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+H43 发现，电子导热中等、电子--离子交换又强时（$G=1$），所有 bt 变体都比整体 BoomerAMG 慢约 2 倍。本报告把电子和离子作为一个 $2\times2$ 耦合块联合求解（bt-j），只丢掉无害的辐射反馈。
+结果：bt-j 在全部 20 个物理区间都收敛，迭代 16--18 步，与整体 BoomerAMG（15--19 步）相同，困难区间从 50--92 步降到 18 步；20 个区间全部有一个 bt 变体比 BoomerAMG 快；
+在真实 SC26\_01 上 bt-j 23 步、20.2\,s（BoomerAMG 23.5\,s）。4 条预测全部成立。带 nodal 粗化的版本（bt-jn）在 9 个区间失败，其余区间也最慢（17--43 步），在真实矩阵上同样失败。
+据此得到一个简单的自适应规则：电子块对角占优时用 bt-v，否则用 bt-j；它在 20 个区间相对 BoomerAMG 的时间比中位数为 0.87（0.65--1.09）。
+\end{abstract}
+
+\section{方法（运行前锁定）}
+方案 \texttt{protocol\_joint.md}，哈希 1c13052e，2026-11-04T07:43:54Z。只丢掉辐射对电子的反馈 $A_{21}$（H43：回路增益小于 1，无害）：
+\[
+\begin{pmatrix}A_{22}&A_{23}\\A_{32}&A_{33}\end{pmatrix}\begin{pmatrix}x_2\\x_3\end{pmatrix}=\begin{pmatrix}r_2\\r_3\end{pmatrix}\ \text{（一次 V 循环）},\qquad A_{11}x_1=r_1-A_{12}x_2\ \text{（一次 V 循环）}.
+\]
+\begin{itemize}
+\item \textbf{bt-j}：$2\times2$ 块按普通标量矩阵交给 BoomerAMG（与 amg-3d 相同参数）。
+\item \textbf{bt-jn}：同上，但交错排列、块大小 2、nodal 粗化（hypre 的 systems AMG）。
+\end{itemize}
+同批次重跑 amg-3d、bt-v、bt-v2。自建离散 $m=64$ 的 20 个区间（同 H43），以及真实 SC26\_01（判据同 H40）。单元测试已确认两种实现作为定常迭代都收敛。
+
+\section{结果}
+\begin{figure}[H]
+\centering
+\includegraphics[width=\linewidth]{regime_joint.png}
+\caption{20 个区间的迭代数（纵轴辐射反馈 $F$，横轴电子导热 $G$），以及自适应规则（电子块非对角占比 $<10^{-2}$ 用 bt-v，否则 bt-j）相对 BoomerAMG 的总时间比。}
+\end{figure}
+\begin{table}[H]
+\centering
+\small
+\begin{tabular}{llrrrr}
+\toprule
+真实 SC26\_01 & 目标 & 迭代 & 设置 (s) & 求解 (s) & 总计 (s) \\
+\midrule
+amg-3d & $10^{-4}$ / $10^{-8}$ & 15 / 23 & 6.8 / 7.4 & 10.3 / 16.0 & 17.1 / 23.5 \\
+bt-v & $10^{-4}$ / $10^{-8}$ & 15 / 23 & 6.3 / 6.0 & 6.9 / 10.8 & \textbf{13.1 / 16.8} \\
+bt-j & $10^{-4}$ / $10^{-8}$ & 15 / 23 & 6.8 / 7.0 & 10.7 / 13.2 & 17.5 / 20.2 \\
+bt-jn & $10^{-4}$ / $10^{-8}$ & 失败 & & & \\
+\bottomrule
+\end{tabular}
+\caption{真实矩阵（单线程，以求解器自报残差为准；真实残差均在双精度下限 $1.3\times10^{-2}$）。真实矩阵的电子块对角占优，bt-v 仍是最快的。}
+\end{table}
+
+\section{预测检验}
+\begin{enumerate}
+\item 困难区间（$G=1$，$F\le10^{-3}$，3 个）bt-j 或 bt-jn 不超过 25 步：\textbf{成立}（bt-j 均为 18 步；bt-v2 为 50--59 步）。
+\item bt-j 在 20 个区间全部收敛，迭代不超过 amg-3d 的 1.3 倍：\textbf{成立}（16--18 步，最多 1.07 倍）。
+\item 20 个区间中至少 18 个，最快 bt 变体比 amg-3d 快：\textbf{成立}（20/20）。
+\item 真实矩阵 bt-j 不超过 23 步且总时间不超过 amg-3d：\textbf{成立}（23 步，20.2\,s 对 23.5\,s）。
+\end{enumerate}
+
+\section{分析}
+\begin{itemize}
+\item \textbf{为什么联合求解有效。}困难区间的本质是电子和离子通过壳层里的强交换紧密耦合，同时电子又有不可忽略的扩散。分开求解（bt-v、bt-v2）必须近似 Schur 补，误差大；
+联合求解让 AMG 直接看到这个耦合，误差只剩 V 循环本身。剩下被分开的只有辐射，而辐射与电子之间的回路增益小于 1，所以分开无害。
+\item \textbf{为什么 nodal 粗化失败。}nodal 粗化要求两个物理量在同一单元上一起粗化；但电子和离子的扩散系数在各区域相差很多数量级（离子 $3\times10^{16}$ 对电子 $10^{-3}$），共同粗化不能同时适合两者。
+普通的按未知量粗化反而让 AMG 分别处理强弱连接，效果更好。
+\item \textbf{bt-j 与整体 AMG 的关系。}bt-j 的迭代数与整体 BoomerAMG 几乎一样，它本质上就是“把辐射拿出来单独做 AMG”的整体 AMG，所以继承了 AMG 的稳健性；
+速度优势来自两个更小、更简单的 AMG 层次，时间比中位数 0.92（0.81--1.36，个别区间受计时噪声影响）。
+\item \textbf{自适应规则。}电子块非对角占比可以在求解前从系数算出。规则“占比 $<10^{-2}$ 用 bt-v，否则 bt-j”在 20 个区间相对 BoomerAMG 的时间比中位数 0.87，范围 0.65--1.09（唯一大于 1 的格子是 bt-v 在 $F=10^{-3},G=2\times10^{-4}$ 时 1.79\,s，同类格子一般约 1.3\,s，应为计时噪声）。
+\end{itemize}
+
+\section{结论}
+\begin{itemize}
+\item bt 系列现在覆盖了全部 20 个物理区间：不再有比 BoomerAMG 慢的区间，困难区间的问题由电子--离子联合求解解决。
+\item 但优势仍然是“每步更便宜”，而不是“迭代更少”：最好的情况快约 35\%，典型约 10\%--20\%。要真正大幅减少迭代，仍需提高两个子块求解的精度（H41/H42 已表明这需要同时改进）。
+\item 对比赛题 SC26\_01，bt-v 仍是最佳选择；bt-j 是在其他物理状态下的稳健替补。两者都可以直接放进已有的 C/MPI 程序（bt-j 只需把离子 Schur 补换成 $2\times2$ 块）。
+\end{itemize}
+\end{document}

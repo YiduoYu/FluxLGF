@@ -1,0 +1,106 @@
+\documentclass[11pt,a4paper]{ctexart}
+\usepackage[margin=2.1cm]{geometry}
+\usepackage{amsmath,amssymb,booktabs,float,graphicx,xcolor,hyperref,enumitem}
+\hypersetup{colorlinks=true,linkcolor=blue!50!black,urlcolor=blue!50!black}
+\setlist{itemsep=2pt,topsep=3pt}
+\title{H53：bt-fd 改用 LU 后重新锁定验证}
+\author{温州肯恩大学 \quad Nonlinear Poisson 项目}
+\date{2026 年 11 月 5 日}
+
+\begin{document}
+\maketitle
+\begin{center}\fcolorbox{red!55!black}{red!3}{\parbox{0.95\linewidth}{\small
+\textbf{更正说明（2026-11-05 加入，依据独立审计和报告 24）。}下面的正文和数字保持原样，未作修改；引用时以本说明和报告 24 为准。
+\begin{enumerate}[leftmargin=1.5em]
+\item 正文中“自报残差”的时间和迭代比较只作诊断，不代表相同精度：同为自报 $10^{-8}$ 时，bt-fd 的对角缩放残差约为 BoomerAMG 的 2379 倍。
+\item 官方判据下的 0.66 倍（22.9\,s 对 34.7\,s）是单遍结果，不是固定常数。隔离进程 5 轮配对后，bt-fd LU 约为 BoomerAMG 的 0.6--0.65 倍（配对范围 0.56--0.73），仅限 SC26\_01 这一个矩阵。
+\item “比赛用 Cholesky”原本依据跨批次比较。同批复测中 Cholesky/LU 的中位数为 0.81（0.74--0.91），方向一致，但只来自 SC26\_01、内层 $10^{-6}$，也未经官方程序验收。
+\item “特征区大小决定胜负”表述偏强。这里的 7.7\%、9.2\% 是外扩前的比例，不能与 H56 外扩后的比例直接比较；后续实验也显示特征区比例不是单调的判据。
+\end{enumerate}
+}}\end{center}
+
+\begin{abstract}
+H52（报告 18）中，不用 AMG 的求解器 bt-fd 只有一条预测不成立：真实 SC26\_01 按求解器自报残差到 $10^{-8}$ 需要 53 步。锁定后查明原因是特征区直接解用了 CHOLMOD Cholesky，它在近奇异的热核上精度不够。
+本报告只做一处改动（特征区改用 MUMPS LU），重新锁定方案后测试：真实矩阵 3 遍、官方判据、12 个自建三温矩阵（其中 5 个从未运行过）。\textbf{5 条预测全部成立。}
+真实矩阵自报残差：$10^{-4}$ 为 8.8\,s 对 BoomerAMG 14.7\,s（0.60 倍），$10^{-8}$ 为 16 步、13.9\,s 对 23 步、18.6\,s（0.75 倍），两档都快于 bt-v；官方判据 $10^{-8}$：22.9\,s 对 34.7\,s（0.66 倍）。
+自建矩阵上 24 次求解 20 次快于 BoomerAMG，外层迭代全部是 BoomerAMG 的 0.38--0.65 倍；4 次失败都在特征区占 7.7\% 和 9.2\% 的两个矩阵上，原因是直接解的 setup（12.5--16.9\,s）。
+\end{abstract}
+
+\section{改动与方案}
+\sloppy
+唯一改动：\texttt{rsolve.ScalarFDLGF} 的特征区直接解一律用 MUMPS LU（H52 对对称块用 CHOLMOD）。方案 \texttt{protocol\_btfd\_lu.md}，sha256 fae2faba，2026-11-05T06:02:51Z 锁定。
+真实矩阵和 H52 的 7 个自建矩阵此前已运行过（用 CHOLMOD）；新增 5 个从未运行的自建矩阵：靶丸 35/45、50/58，热容 $\times3$、$\times0.3$，以及 $F=10^{-6},G=10^{-3}$。
+其余设置同 H52：GMRES(50)、右预条件、$x_0=0$、单线程、顺序运行。
+
+\section{结果}
+\begin{figure}[H]
+\centering
+\includegraphics[width=\linewidth]{results53.png}
+\caption{左：真实矩阵，求解器自报残差，3 遍中位数。中：真实矩阵，官方判据（双双精度迭代修正）。右：12 个自建三温矩阵上 bt-fd 相对 BoomerAMG 的时间比（低于 1 表示更快）。}
+\end{figure}
+
+\begin{table}[H]
+\centering\footnotesize
+\begin{tabular}{lrrrr}
+\toprule
+真实 SC26\_01 & 自报 $10^{-4}$ & 自报 $10^{-8}$ & 官方 $10^{-4}$ & 官方 $10^{-8}$ \\
+\midrule
+BoomerAMG & 15 步 / 14.7\,s & 23 / 18.6\,s & 28 / 27.0\,s & 37 / 34.7\,s \\
+bt-v & 15 / 12.2\,s & 23 / 15.9\,s & 28 / 22.6\,s & 38 / 28.1\,s \\
+\textbf{bt-fd（LU）} & \textbf{6 / 8.8\,s} & \textbf{16 / 13.9\,s} & \textbf{11 / 17.7\,s} & \textbf{16 / 22.9\,s} \\
+bt-fd（CHOLMOD，H52） & 6 / 7.4\,s & 53 / 28.5\,s & 11 / 13.7\,s & 16 / 17.4\,s \\
+\bottomrule
+\end{tabular}
+\caption{自报判据为 3 遍中位数（3 遍之间差别 $\le0.9$\,s）。bt-fd（LU）的 setup 6.0--7.4\,s，BoomerAMG 5.9--7.5\,s。最后一行是 H52 的数据，供对比。}
+\end{table}
+
+\begin{table}[H]
+\centering\footnotesize\setlength{\tabcolsep}{4pt}
+\begin{tabular}{lrrrrr}
+\toprule
+自建三温 $m=128$ & 特征区 & BoomerAMG $10^{-4}$/$10^{-8}$ & bt-fd $10^{-4}$/$10^{-8}$ & 时间比 & bt-fd setup \\
+\midrule
+\multicolumn{6}{l}{\emph{新矩阵}} \\
+35/45 & 2.5\% & 12/21 步，11.9/15.9\,s & 6/9 步，5.7/6.8\,s & 0.48/0.43 & 3.4\,s \\
+50/58 & 5.3\% & 13/22，11.9/16.1 & 6/9，10.0/11.2 & 0.84/0.69 & 7.1\,s \\
+热容 $\times3$ & 4.3\% & 11/20，11.2/15.3 & 5/9，7.4/8.9 & 0.66/0.58 & 5.2\,s \\
+热容 $\times0.3$ & 4.3\% & 13/22，11.9/16.5 & 6/10，8.2/9.7 & 0.69/0.59 & 5.3\,s \\
+$F=10^{-6},G=10^{-3}$ & 4.3\% & 13/21，12.9/16.4 & 6/10，8.2/9.9 & 0.64/0.61 & 5.5\,s \\
+\multicolumn{6}{l}{\emph{H52 已运行过的矩阵}} \\
+基准 43/54 & 4.3\% & 13/21，12.5/16.3 & 6/9，8.2/9.3 & 0.66/0.57 & 5.5\,s \\
+小靶丸 25/32 & 0.9\% & 13/21，12.6/16.3 & 5/9，4.2/5.5 & 0.33/0.34 & 2.4\,s \\
+薄壳大核 60/66 & 7.7\% & 13/21，12.5/16.4 & 6/10，16.5/19.1 & \textbf{1.31/1.17} & 12.5\,s \\
+厚壳 30/70 & 9.2\% & 12/20，11.9/15.7 & 6/10，21.9/23.9 & \textbf{1.84/1.52} & 16.9\,s \\
+热容 $\times0.1$ & 4.3\% & 15/24，13.7/18.1 & 7/12，8.5/10.5 & 0.62/0.58 & 5.3\,s \\
+热容 $\times10$ & 4.3\% & 10/18，11.6/14.8 & 5/8，7.6/9.2 & 0.65/0.62 & 5.3\,s \\
+$F=10^{-3},G=10^{-2}$ & 4.3\% & 12/20，12.6/16.4 & 7/13，10.0/12.9 & 0.79/0.79 & 5.9\,s \\
+\bottomrule
+\end{tabular}
+\caption{特征区为外扩前的比例（两个标量块相同）。bt-v 为 BoomerAMG 的 0.78--0.91 倍。}
+\end{table}
+
+\section{预测检验}
+\begin{enumerate}
+\item 真实矩阵自报判据：bt-fd 中位数时间 $10^{-4}$ 不超过 0.75 倍、$10^{-8}$ 不超过 0.85 倍，两档都快于 bt-v：\textbf{成立}（0.60、0.75；bt-v 为 12.2、15.9\,s）。
+\item 官方判据 $10^{-8}$：bt-fd 快于 BoomerAMG 和 bt-v：\textbf{成立}（22.9\,s 对 34.7\,s、28.1\,s）。
+\item 自建矩阵 24 次全部收敛，且至少 11/12 个矩阵到 $10^{-8}$ 的迭代不超过 BoomerAMG 的 0.7 倍：\textbf{成立}（24/24；12/12，0.41--0.65 倍）。
+\item 自建矩阵 24 次中至少 18 次快于 BoomerAMG：\textbf{成立}（20/24；失败的 4 次是 60/66 和 30/70）。
+\item 13 个矩阵上 bt-fd 的线性缺陷不超过 $10^{-14}$：\textbf{成立}（全部 $\le1.0\times10^{-16}$）。
+\end{enumerate}
+
+\section{讨论}
+\begin{itemize}
+\item \textbf{LU 与 Cholesky 的取舍。}LU 修好了自报判据下 $10^{-8}$ 的尾部（53 → 16 步），代价是 setup 增加约 1--1.5\,s。官方判据下迭代修正每步内层只需 $10^{-6}$，两种分解迭代数相同（11/16 步），所以 CHOLMOD 反而更快（17.4\,s 对 22.9\,s）。
+\textbf{结论：比赛（官方判据 + 迭代修正）用 Cholesky，只按自报残差到 $10^{-8}$ 时用 LU。}
+\item \textbf{特征区大小决定胜负。}特征区约 5\% 以下时，bt-fd 是 BoomerAMG 的 0.33--0.79 倍；7.7\% 和 9.2\% 时，直接解的 setup 增长到 12.5--16.9\,s，外层迭代虽然仍只有一半，总时间输 1.2--1.8 倍。
+真实 SC26\_01 的特征区为 4.6\%/4.8\%，在有利区间内。
+\item \textbf{迭代数非常稳定。}12 个自建矩阵上外层迭代都是 BoomerAMG 的 0.38--0.65 倍，与几何、时间步、耦合强度基本无关；时间差异几乎全部来自特征区直接解的成本。
+\end{itemize}
+
+\section{下一步}
+(a) \textbf{降低特征区成本}：热核本身是常系数，可再嵌套一层快速求解（或用低秩/分层直接解），只对过渡层和壳层做直接解，使大特征区也能获胜；
+(b) \textbf{C/MPI 实现}：替换现有 C 版本中 bt-v 的两个 BoomerAMG 块，测多核和海光 DCU；
+(c) 比赛提交时用 Cholesky + 迭代修正（本报告的官方判据结果）。
+
+\paragraph{文件。}\sloppy \texttt{FD\_LGF/regions/}：\texttt{protocol\_btfd\_lu.md}、\texttt{test\_lu.sh}、\texttt{lin.py}；结果 \texttt{results/h53\_*}；图 \texttt{report/make\_fig53.py}。
+\end{document}

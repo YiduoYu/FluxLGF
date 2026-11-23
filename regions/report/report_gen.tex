@@ -1,0 +1,100 @@
+\documentclass[11pt,a4paper]{ctexart}
+\usepackage[margin=2.1cm]{geometry}
+\usepackage{amsmath,amssymb,booktabs,float,graphicx,xcolor,hyperref,enumitem}
+\hypersetup{colorlinks=true,linkcolor=blue!50!black,urlcolor=blue!50!black}
+\setlist{itemsep=2pt,topsep=3pt}
+\title{H56 探索：bt-fd / bt-fdd 的泛化能力、文献方法与跨时间步复用}
+\author{温州肯恩大学 \quad Nonlinear Poisson 项目}
+\date{2026 年 11 月 5 日}
+
+\begin{document}
+\maketitle
+\begin{center}\fcolorbox{red!55!black}{red!3}{\parbox{0.95\linewidth}{\small
+\textbf{更正说明（2026-11-05 加入，依据独立审计和报告 24）。}下面的正文和数字保持原样，未作修改；引用时以本说明和报告 24 为准。
+\begin{enumerate}[leftmargin=1.5em]
+\item 本报告是探索性结果。10 个胶囊的 0.86 倍偏乐观：独立进程重跑锁定序列 G8、G9、G10 后都是 bt-fd 更慢（1.67、1.09、1.50 倍）。
+\item 讨论中“在实际的时间推进计算里”应读作“在所构造的有界系数扰动序列上”。$\delta=0.02$ 时同一点系数比最多 1.041，不能外推到前沿移动或需要重建预条件子的情形。
+\item 序列比较按自报残差计算，不代表相同精度。合成矩阵离子块热核行的反应项还带有最多 $\pm10\%$ 的组装舍入偏差，所以不能说每步只改变了 $\kappa(T)$。
+\end{enumerate}
+}}\end{center}
+
+\begin{abstract}
+\sloppy
+H53/H55 的测试矩阵都是同心球几何。本报告用新的生成器检验 bt-fd 和 bt-fdd 在其他几何上的表现，并按文献尝试改进；按要求不退回 AMG，BoomerAMG 只作为计时参照。全部为\textbf{探索性}结果（开发用例，单遍，未锁定）。
+\textbf{(1)} 非球形区域、渐变过渡层：仍然有效。
+\textbf{(2)} 系数平滑变化（模拟 $\kappa(T)$）：原匹配容差 $10^{-6}$ 使整块退化为直接解；放宽到 0.1 后特征区回到 5.5\%，10\% 的系数变化下 bt-fd 仍只要 6/10 步，且对真实矩阵和原几何基本无影响。
+\textbf{(3)} 很多小夹杂：单次求解输给 BoomerAMG。按文献试了 5 种改进（每个夹杂一个缩减向量、减薄外扩层、MUMPS 块低秩、METIS 排序、按频率校正背景），都没有实质效果。
+\textbf{(4)} 跨时间步：Krylov 回收（GCRO-DR）能减少 15--30\% 的迭代，但更新回收空间的开销抵消了收益，总是更慢；\textbf{复用分解}才是关键。在 $m=128$、5 个时间步、双方都复用 setup 的公平比较下，
+bt-fd 在单胶囊基准上是 BoomerAMG 的 0.52 倍，在 10 个随机胶囊上是 0.86 倍（单次求解时这个用例输 1.6 倍）。
+\end{abstract}
+
+\section{泛化生成器}
+\sloppy \texttt{gen\_gen.py} 沿用 gen3t 的三温方程和三层系数表（热核、壳层、外部），几何改为：$n$ 个胶囊（$n=1$ 时与 gen3t 相同，已验证矩阵一致到舍入误差；$n>1$ 时随机位置，核半径 6--20，壳/核比 1.15--1.6）；
+形状用 $p$-范数（2 球、1 八面体、8 近似方块）和纵横比（$z$ 半轴与 $x$ 半轴之比）；界面过渡宽度 $w$ 格（系数按对数线性插值）；外加平滑相对扰动 $\delta$（$\kappa_1,\kappa_3$ 乘以 $1+\delta\,\phi(x)$，模拟温度相关的导热系数）。
+时间序列：几何固定，$\phi$ 每步平移相位 0.15，右端项每步不同，每步矩阵元素变化 0.1--0.3\%。
+
+\section{开发用例的结果（$m=64$，单次求解）}
+\begin{table}[H]
+\centering\footnotesize
+\begin{tabular}{llrl}
+\toprule
+用例 & 特征区（bt-fd / bt-fdd） & bt-fd 迭代 & 结论 \\
+\midrule
+八面体、扁方块（纵横比 0.5） & bt-fdd 1.4--4.2\% & 5--6 / 9--10 & 有效 \\
+过渡层 $w=4$ & 6.6\% / 5.5\% & 5 / 8 & 有效 \\
+平滑变化 $\delta=10^{-3}$，容差 $10^{-6}$ & 100\% & --- & 退化为直接解 \\
+$\delta=10^{-3}$--$10^{-1}$，容差 0.1 & 5.3--5.5\% / 3.8\% & 5--6 / 9--10 & 有效（BoomerAMG 11/18） \\
+10 个胶囊 & 17.7\% / 16.6\% & 7 / 12 & 与 BoomerAMG 持平 \\
+30 个胶囊 & 44.8\% / 40.4\% & 12 / 19 & 输（4.2/5.2\,s 对 1.3/1.8\,s） \\
+\bottomrule
+\end{tabular}
+\caption{迭代为到 $10^{-4}$ / $10^{-8}$。容差 0.1 在 $m=128$ 上对真实矩阵（bt-fd 到 $10^{-8}$ 16 → 18 步）、几何 30/70、43/54 和过渡层用例基本无影响。}
+\end{table}
+$m=128$、10 个胶囊的单次求解：bt-fd 22--29\,s、bt-fdd 21--37\,s，BoomerAMG 13.6/17.0\,s。
+
+\section{很多小夹杂：文献方法的尝试}
+\begin{table}[H]
+\centering\footnotesize
+\begin{tabular}{p{4.6cm}p{4.4cm}p{5.2cm}}
+\toprule
+文献思路 & 做法 & 结果（30 个胶囊，$m=64$；BLR/METIS 为 10 个胶囊，$m=128$） \\
+\midrule
+每个高导区域一个缩减向量（Vuik 等 1999；Galvis--Efendiev 的高对比度粗空间） & 小夹杂也单独成区域并加粗向量 & 特征区 40.4\% → 40.2\%，迭代不变（16/27） \\
+电容矩阵法：成本应只与界面有关（O'Leary--Widlund 1979） & 外扩层 2 → 1 → 0 & 特征区 40 → 32 → 18\%，迭代 27 → 39 → 81 \\
+MUMPS 块低秩分解（Amestoy、Mary） & BLR 阈值 $10^{-8}$、$10^{-6}$ & bt-fd 迭代暴增到 50--100 步，部分不收敛：热核接近奇异，需要全精度分解 \\
+嵌套剖分排序 & MUMPS METIS & bt-fd 约快 10\% \\
+最优余弦预条件 / FFT 均匀化的参考介质（T.~Chan 1988；Moulinec--Suquet 1998） & 用探测模态按频率校正背景符号 & 实测偏差只有 0.8--0.9，迭代不变 \\
+\bottomrule
+\end{tabular}
+\end{table}
+\paragraph{诊断。}预条件算子偏离 1 的 Ritz 值个数随夹杂增多而增长（1、10、30 个胶囊：0、1、16 个）；即使每个胶囊都在特征区里精确求解，bt-fd 的迭代也从 9 涨到 19。
+慢模态在离子块：残差在远处外部区域，响应在胶囊内部，既不是“每个夹杂一个常数模态”，也不是简单的等效导热系数偏低，所以上表前两种和最后一种思路都对不上。
+另外，小胶囊几乎全部是界面，30 个胶囊时 40--45\% 的单元必须直接解，每步迭代的成本（约 0.22\,s）是 BoomerAMG（约 0.07\,s）的 3 倍。
+
+\section{跨时间步：Krylov 回收与分解复用}
+\texttt{gcrodr.py} 实现 GCRO-DR（Parks、de Sturler 等 2006）：右预条件，预条件子只在第 0 步构造并在后续步复用（同时复用了特征区的分解）；保存 $Y=PU$，换矩阵时只需 $k$ 次稀疏乘法 $A_sY$ 重建回收空间。
+停止判据与 PETSc GMRES 相同（求解器自报残差）；$k=0$ 时与 PETSc GMRES(50) 的迭代数和精度完全一致。$m=128$ 时 $n=630$ 万，为避免内存交换把重启长度设为 30（之前的计时因交换而失真，已重测）。
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\linewidth]{results56.png}
+\caption{$m=128$，5 个时间步（$\delta=0.02$，容差 0.1）的总时间和平均每步迭代。“复用”指 setup 只在第 0 步做一次；BoomerAMG 复用用 PETSc 的 \texttt{setReusePreconditioner}。}
+\end{figure}
+
+\begin{itemize}
+\item \textbf{复用分解是关键。}bt-fd 的成本主要在特征区分解，复用后摊到各步：单胶囊 34.2\,s 对 BoomerAMG（复用）65.5\,s，\textbf{0.52 倍}；10 个胶囊 53.7\,s 对 62.3\,s，\textbf{0.86 倍}。冻结的预条件子在 5 步的系数漂移下迭代数不变。
+\item \textbf{Krylov 回收总是更慢。}迭代减少 10--30\%（bt-fd 10 → 9，bt-fdd 17 → 14，10 个胶囊 27 → 23），但每个周期更新回收空间要做若干次 $n\times(k+m)$ 的稠密运算，开销超过省下的迭代；$k=10$ 时有效 Arnoldi 步数变少，bt-fdd 甚至变成 29 步。$m=64$、30 个胶囊同样如此（19 → 15 步，时间不变）。
+\item bt-fdd 在复用场景下不如 bt-fd：它的优势在于 setup 小，而复用之后 setup 已不重要，迭代数多的劣势就显出来了。
+\end{itemize}
+
+\section{结论与下一步}
+\begin{enumerate}
+\item 匹配容差改为 0.1，系数平滑变化不再是问题。
+\item 很多小夹杂是这类方法的结构性弱点（大的常系数区域不存在），文献中直接可用的改进都没有效果。
+\item 在实际的时间推进计算里，\textbf{bt-fd + 跨步复用分解} 在已测的两个几何上都快于同样复用 setup 的 BoomerAMG；Krylov 回收不值得。
+\item 下一步：把“时间序列 + 复用”的比较锁定为 H56（新随机种子、$m=128$，多夹杂、形状、过渡层、平滑变化各若干，bt-fd/bt-fdd 复用对 BoomerAMG 复用），并测试复用多少步后需要重建预条件子。
+\end{enumerate}
+
+\paragraph{文件。}\sloppy \texttt{FD\_LGF/regions/}：\texttt{gen\_gen.py}、\texttt{gcrodr.py}、\texttt{seq.py}、\texttt{explore\_tol.py}、\texttt{explore\_many.py}、\texttt{explore\_lu.py}、\texttt{calib.py}、\texttt{explore\_calib.py}、\texttt{diag\_ritz.py}；
+\texttt{rsolve.py} 新增 \texttt{MIN\_REGION}、\texttt{BLR}、\texttt{ORDERING}（默认值与 H53/H55 相同）并修复 K=0 时的错误；结果 \texttt{results/explore\_gen64.log}、\texttt{explore\_tol*.log}、\texttt{explore\_many64.log}、\texttt{explore\_lu128.log}、\texttt{explore\_calib64.log}、\texttt{diag\_ritz64.log}、\texttt{explore\_seq64.log}、\texttt{explore\_seq128b.log}；图 \texttt{report/make\_fig56.py}。
+\end{document}

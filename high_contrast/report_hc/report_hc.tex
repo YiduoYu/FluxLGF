@@ -1,0 +1,175 @@
+\documentclass[11pt,a4paper]{ctexart}
+\usepackage[margin=2.2cm]{geometry}
+\usepackage{amsmath,amssymb,booktabs,graphicx,float,xcolor,adjustbox,hyperref}
+\hypersetup{colorlinks=true,linkcolor=blue!50!black,citecolor=blue!50!black,urlcolor=blue!50!black}
+\title{FD-LGF 在更一般的高对比度系数上的表现\\以及 BoomerAMG 的弱点}
+\author{温州肯恩大学 \quad Nonlinear Poisson 项目}
+\date{2026 年 11 月 3 日}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+H31/H32 的系数都只依赖 $x$。本报告把系数推广到 10 类二维高对比度系数（可分离、通道、棋盘、对数正态、类 SPE10 分层、斜条纹、
+绝缘墙、渗流阈值处的随机两相、细斜条纹、粗糙随机场）和 5 类三维系数，统一写成 $a=\chi^{g}$、$g\in[0,1]$，
+因此对比度恰好是 $\chi\le10^8$。对比的方法是 FD-LGF（即原“方法二”）、hypre BoomerAMG 和 GMG（Jacobi 阻尼取教科书值），
+不再包括传统 LGF。另外专门找了 BoomerAMG 的弱点。
+\textbf{结论：}(1) 在本项目的方程（标量 $a$、通量差分，矩阵总是 M-矩阵）上，BoomerAMG 极其稳健：
+二维 10 类、三维 5 类、$\chi$ 到 $10^8$ 都只要 7--13 次迭代，没有找到它迭代失败的例子；它的弱点是三维的成本，
+$n=127$ 时 8--17\,s，比 GMG 慢 2--5 倍。
+(2) FD-LGF 的优势只在背景可分离时成立：三维薄层上比 BoomerAMG 快 25--40 倍，三维管道网络上快约 2 倍；
+二维 $a_1(x)a_2(y)$ 时迭代只要 3--4 次，但 $n=1023$ 时稠密快速对角化的 $O(n^3)$ 成本使它与 BoomerAMG 持平。
+(3) 对不可分离系数（棋盘、随机场、斜条纹、随机两相），FD-LGF 的局部区域覆盖网格的 46--100\%，退化为稀疏直接法，
+比 BoomerAMG 慢 1.8--14 倍；这类系数应该用 AMG（或者 H16/H17 的 Green--Jacobi 两层法处理光滑部分）。
+(4) GMG 在细斜条纹、随机两相上要 106--368 次，是三种方法里最不稳健的。
+\end{abstract}
+
+\tableofcontents
+
+\section{FD-LGF 详解}
+\paragraph{名字。}FD-LGF 是 Fictitious-Domain Lattice Green's Function preconditioner 的缩写，中文为“虚拟区域格点 Green 函数预条件”，
+其中的背景逆用快速对角化方法（FDM）实现。H30--H32 中称为“方法二”。
+
+\subsection{出发点}
+传统 LGF（Xia 论文式 (14)--(15)）用 $M=\bar a(-\Delta_h)+\lambda I$、$\bar a=\mathrm{mean}(a)$ 作预条件。
+$A-M$ 遍布整个区域，量级与 $a$ 的变化相同，所以条件数随对比度增长，$\chi=10^4$ 时就需要上千次迭代。
+快速变换能精确求逆的，其实不止常系数，可分离系数也可以；传统 LGF 把这部分也用常数近似掉了。
+
+\subsection{分解}
+\[
+  a(x,y)=b(x,y)\,\phi(x,y),\qquad b=a_1(x)\,a_2(y),\qquad \phi\neq1 \text{ 只在“特征”（夹杂、通道、墙）内。}
+\]
+系数为 $b$ 的通量算子记为 $B$。$A$ 和 $B$ 只在特征及其相邻的面上不同。
+“虚拟区域”指 $G=B^{-1}$ 定义在整个方盒上，把特征当作不存在，用背景系数填满。
+
+\subsection{背景逆 $G$（快速对角化）}
+$b$ 可分离时，$x$ 方向的面系数是 $a_2(y_j)\cdot\tfrac12\big(a_1(x_i)+a_1(x_{i+1})\big)$，所以
+\[
+  BU = D_2\,U\,T_x + T_y\,U\,D_1 + (\text{$q$ 的可分离部分}),\qquad D_1=\mathrm{diag}(a_1),\ D_2=\mathrm{diag}(a_2),
+\]
+其中 $U$ 的行对应 $y$、列对应 $x$，$T_x,T_y$ 是一维通量三对角矩阵。解广义特征值问题 $T_xV=D_1V\Lambda$、$T_yW=D_2WM$ 后，
+\[
+  B^{-1}F = W\Big[(W^{\mathsf T}FV)\ ./\ (\mu_j+\lambda_i)\Big]V^{\mathsf T}\qquad\text{(Lynch--Rice--Thomas 1964)}.
+\]
+$a_2$ 为常数时，$y$ 方向用 DST-I 对角化，剩下每个模态在 $x$ 方向解一个三对角方程，复杂度 $O(n^2\log n)$；
+$a_1$ 为常数时转置后同理（本次新增）；$a_1,a_2$ 都变化时用上式稠密实现，二维每次作用 $O(n^3)$。
+$q$ 用它的可分离部分代替，这是 $G$ 中唯一的近似。
+
+\subsection{局部精确解 $Q$}
+特征集取 $\{|\log a-\log b|>\log 2\}$，向外膨胀一圈物理宽度 $w$ 的环，按连通分量分块；
+每块取 $A$ 的子矩阵 $A_k$（块外的值取 0），做稀疏 LU：$Q=\sum_kR_k^{\mathsf T}A_k^{-1}R_k$。
+局部解必须精确：H9 中用一个 V-cycle 或 Chebyshev 多项式代替 LU，迭代数会升到 25--540 次。
+
+\subsection{平衡组合}
+一次作用相当于对称的逐次子空间校正（Xu 1992）：先局部、再全局背景、最后再局部。误差传播算子为
+$E=(I-QA)(I-GA)(I-QA)$。局部解精确时 $QAQ=Q$，于是
+\[
+  P=(I-E)A^{-1}=Q+(I-QA)\,G\,(I-AQ).
+\]
+$G$ 和 $A_k$ 对称正定，所以 $P$ 对称正定，可以直接用于 CG。
+这个形式与 BNN/deflation 的平衡预条件（Mandel 1993；Tang 等 2009）相同，但角色相反：那里的 $Q$ 是低维粗空间，
+这里的 $Q$ 是局部精确解；那里的 $M$ 是光滑子，这里的 $G$ 是全局精确的背景逆。
+
+\subsection{为什么与 $\chi$、$n$ 无关，什么时候不行}
+$G$ 对背景精确、$A_k^{-1}$ 对局部精确，两者都不随 $\chi$ 变差；收敛速度只由两个子空间的几何关系（环宽相对于特征尺度）决定，
+环宽按物理长度固定时与 $n$ 无关。不行的情况是：特征体积占区域的大部分时，局部区域几乎覆盖整个网格，
+$Q$ 本身就是一次整体 LU，FD-LGF 退化为稀疏直接法；背景两方向都变化时，二维 $G$ 每次作用 $O(n^3)$，大网格时变慢。
+
+\section{新的高对比度系数}
+所有系数都写成 $a=\chi^{g}$，$g\in[0,1]$，与教授的 $\chi^x$ 一样，对比度恰好是 $\chi$。离散 MMS：$u^*=\sin\pi x\sin\pi y$，$f=A_hu^*$，
+$q=1+0.2\cos2\pi x\cos2\pi y$。随机场在 $1025\times1025$ 节点上生成一次再抽样，所以各个 $n$ 用的是同一个场。
+FD-LGF 的分解（背景 $a_1,a_2$ 与特征）按构造给定：可分离族和通道族用真实背景；棋盘、斜条纹、随机两相用低相作背景、高相作特征；
+绝缘墙用导电背景、墙作特征；随机场用对 $\log a$ 的稳健可分离拟合。
+\begin{figure}[H]\centering
+\includegraphics[width=\textwidth]{gallery.png}
+\caption{10 类二维系数（$\log_{10}a$，$\chi=10^8$，$n=255$）；白线为 FD-LGF 的特征边界，括号内是特征所占比例。}
+\end{figure}
+三维系数族：sheets（垂直于 $x$ 的三块高导薄层，$a=a_1(x)$）、tubes（沿三个方向的 27 根高导管道）、
+insul（导电背景被三块中间开小孔的绝缘板分成 8 个卦限）、perc3（$16^3$ 随机两相体素）、lognorm3（三维对数正态场）。
+这些类型来自文献中的高对比度测试问题：夹杂和颗粒、高导通道（Galvis--Efendiev；Graham--Lechner--Scheichl）、
+棋盘交叉点（对比度到 $10^8$）、高方差对数正态场、SPE10 分层介质等，见第~\ref{sec:lit} 节。
+
+\section{实验设置}
+方法：BoomerAMG（PETSc 默认参数；三维另测强连接阈值 $\theta=0.25$ 与 $0.5$）、GMG（二维 $\omega=4/5$，三维 $6/7$）、
+FD-LGF（二维环宽 $w=1/16,1/64$，三维 $w=1/32,1/64$）。传统 LGF 不再参加。
+共用同一个 PCG 循环，停止规则为 $\|r\|/\|f\|\le10^{-10}$，maxiter 为 1000（三维 500）；单线程计时，3 次取中位数（单次超过 5\,s 时只跑 1 次）。
+\textbf{探索阶段}：二维 $n=255,511$ 和三维 $n=31,63,127$ 的扫描。
+\textbf{确认阶段}：二维 $n=1023$，方案在运行前锁定（SHA-256 前 8 位 \texttt{c2ff7672}），预测依据探索阶段的结果。
+
+\section{寻找 BoomerAMG 的弱点（探索性）}
+文献中经典 AMG 公认的困难情形是：不与网格对齐的各向异性，以及强连接图被割裂、插值无法跨越的情形（\S\ref{sec:lit}）。
+我们的离散总是 M-矩阵，所以重点测试了：细斜条纹（等效的非对齐各向异性）、绝缘墙和绝缘板（强连接图被切断）、
+渗流阈值处的随机两相介质，以及三维。
+\input{tables_scan.tex}
+\paragraph{结论。}二维扫描中 BoomerAMG 在所有情形下 7--13 次（表~\ref{tab:scan}），三维 7--12 次（表~\ref{tab:s3its63}、\ref{tab:s3its127}），
+都没有随 $\chi$ 明显增长；三维迭代数随 $n$ 缓慢增加（$\theta=0.5$ 时从 $n=31$ 的 7--10 次增加到 $n=127$ 的 10--12 次），$\theta=0.25$ 时更稳定（7--10），但 setup 更贵。
+\textbf{没有找到 BoomerAMG 在本项目方程上迭代失败的例子。}它的真正短板是三维成本：$n=127$ 时总时间 8--17\,s，
+其中 setup 5--8\,s，比 GMG（2--5\,s）慢 2--5 倍（表~\ref{tab:s3time}）。
+在这些三维情形中，FD-LGF 在 sheets 上只要 0.3--0.5\,s（2--3 次迭代），比 BoomerAMG 快 25--40 倍；在 tubes 上（$w=1/64$）4.6--8.5\,s，约为 BoomerAMG 的一半；
+在 insul 上，贯穿整个区域的绝缘板加上外环构成一个很大的三维 LU 区域，要 115--790\,s，不可用。
+真正让 GMG 吃力的是细斜条纹（最多 368 次）和随机两相（最多 106 次）。
+
+\section{确认性结果（二维，$n=1023$）}
+迭代次数、误差到 $10^{-8}$ 的迭代、时间、setup、局部比例和代数误差分别见表~\ref{tab:its}--\ref{tab:err}。
+\input{tables_1023.tex}
+\begin{figure}[H]\centering
+\includegraphics[width=\textwidth]{time1023.png}
+\caption{$n=1023$：各方法总时间（竖线为 4 个 $\chi$ 的范围，点为最大值）。}
+\end{figure}
+\paragraph{预测检验（锁定方案 \texttt{c2ff7672}）。}
+\begin{enumerate}
+\item BoomerAMG 对所有系数和 $\chi$ 都 $\le15$ 次——\textbf{成立}（最多 13 次）。
+\item GMG 在 diagfine、perc 上超过 100 次，且至少 6 类系数达到 BoomerAMG 的 2 倍以上——\textbf{成立}（368、106 次；7 类）。
+\item sep2：FD-LGF $\le4$ 次——\textbf{成立}；总时间 $\le0.8\times$ BoomerAMG——\textbf{不成立}（0.93--1.09 倍）。
+  原因是 $a_1,a_2$ 都变化，只能用稠密快速对角化，$n=1023$ 时每次作用 $O(n^3)$；$n=511$ 时它还是 BoomerAMG 的约 0.6 倍。
+\item 六类不可分离系数：FD-LGF（$w=1/16$）局部比例 $\ge0.8$——\textbf{部分成立}（diag、diagfine、perc、rough 为 1.0；layered、lognorm
+  在低 $\chi$ 时只有 0.46--0.64，因为偏离背景 2 倍以上的点较少）；时间 $\ge3\times$ BoomerAMG——\textbf{基本成立}
+  （diag 在 $w=1/64$、$\chi=10^8$ 时只慢 1.8 倍，其余 5.2--14 倍）。
+\item chan、walls：FD-LGF 最快的环宽 $\le2\times$ BoomerAMG——walls \textbf{成立}（1.11--1.21），chan \textbf{勉强不成立}（最多 2.09）；
+  FD-LGF（$w=1/16$）迭代数 $\le$ BoomerAMG+1——\textbf{成立}（比 BoomerAMG 少 1--4 次）。
+\end{enumerate}
+\paragraph{精度。}所有方法收敛到同一个离散解（离散 MMS，代数误差即总误差）。按残差停止时，FD-LGF 在 checker、perc、diag 上的代数误差
+可达 $10^{-4}$（BoomerAMG $\le2\times10^{-11}$）：与 H20/H31 相同，残差规则看不到低系数区的误差。按误差计数时，FD-LGF 在 checker 上 8 次即可达到 $10^{-8}$（表~\ref{tab:k8}）。
+
+\section{与文献中高对比度方法的比较}\label{sec:lit}
+\begin{itemize}
+\item \textbf{谱粗空间 / 多尺度区域分解}（Galvis--Efendiev 2010；GenEO 2014；Scheichl--Vassilevski--Zikatanov 2011）：
+  粗空间加入局部特征值问题的低频特征函数，每个孤立的夹杂或通道对应粗基函数，条件数与对比度无关；夹杂和通道越多，粗空间越大。
+  FD-LGF 没有粗空间：背景的全尺度由精确的 $G$ 负责，特征由局部 LU 负责，代价转移到 LU 的规模上（特征体积越大越贵）。
+\item \textbf{鞍点重写}（Gorb--Kurzanova--Kuznetsov 2018）：把高导颗粒问题改写成鞍点系统，迭代数与对比度和网格无关。
+  FD-LGF 不改问题，只改预条件；两者都利用“特征是局部的”。
+\item \textbf{FFT/Green 类}（Moulinec--Suquet；Zeman 2010；Ladecký 2023、2025）：参考介质是常系数，Green--Jacobi 适合光滑系数，
+  对尖锐界面效果不好。FD-LGF 的参考介质是可分离的分层介质，再加局部修正。
+\item \textbf{AMG}（Henson--Yang 2002；Alcouffe 等 1981）：经典 AMG 的强连接判据基于 M-矩阵假设；公认的弱点是非对齐各向异性和非 M-矩阵。
+  在标量系数、M-矩阵的跳跃系数问题上，文献与本报告的实验都显示它非常稳健。
+\end{itemize}
+综合起来，FD-LGF 适合的问题是：笛卡尔网格、背景（近似）可分离或分层、特征体积较小。这正是教授的 $\chi^x$、分层储层（加少量夹杂或断层）、
+三维层状复合材料这类问题。
+
+\section{结论与下一步}
+\begin{enumerate}
+\item BoomerAMG 在本项目方程的高对比度问题上非常稳健（7--13 次），唯一的短板是三维 setup 成本。要构造它迭代失败的例子，
+  需要离开“标量系数 + 通量差分”，例如不与网格对齐的各向异性张量系数（会产生非 M-矩阵），这已超出当前方程，需要确认是否要做。
+\item FD-LGF 的竞争力取决于背景是否可分离、特征体积有多大：可分离背景、小体积特征时最快（三维薄层快 25--40 倍）；
+  不可分离、大体积特征时退化为直接法，不应使用。
+\item 可改进之处：背景两方向都变化时，可以只在一个方向用快速变换、另一个方向用三对角或多重网格，避免 $O(n^3)$；
+  局部 LU 可以换成嵌套剖分或块低秩 LU，以降低三维大特征时的 setup。
+\end{enumerate}
+
+\begin{thebibliography}{99}\small
+\bibitem{xia} Q.~Xia, Unfitted boundary-algebraic preconditioning for exact-Jacobian Newton--Krylov solution of quasilinear elliptic problems in complex geometry, preprint.
+\bibitem{lrt} R.~E.~Lynch, J.~R.~Rice, D.~H.~Thomas, Direct solution of partial difference equations by tensor product methods, Numer. Math. 6 (1964) 185--199.
+\bibitem{xu} J.~Xu, Iterative methods by space decomposition and subspace correction, SIAM Rev. 34 (1992) 581--613.
+\bibitem{mandel} J.~Mandel, Balancing domain decomposition, Comm. Numer. Methods Eng. 9 (1993) 233--241.
+\bibitem{tang} J.~M.~Tang, R.~Nabben, C.~Vuik, Y.~A.~Erlangga, Comparison of two-level preconditioners derived from deflation, domain decomposition and multigrid methods, J. Sci. Comput. 39 (2009) 340--370.
+\bibitem{ge} J.~Galvis, Y.~Efendiev, Domain decomposition preconditioners for multiscale flows in high-contrast media, Multiscale Model. Simul. 8 (2010) 1461--1483.
+\bibitem{geneo} N.~Spillane, V.~Dolean, P.~Hauret, F.~Nataf, C.~Pechstein, R.~Scheichl, Abstract robust coarse spaces for systems of PDEs via generalized eigenproblems in the overlaps, Numer. Math. 126 (2014) 741--770.
+\bibitem{svz} R.~Scheichl, P.~S.~Vassilevski, L.~T.~Zikatanov, Weak approximation properties of elliptic projections with functional constraints, Multiscale Model. Simul. 9 (2011) 1677--1699.
+\bibitem{gls} I.~G.~Graham, P.~O.~Lechner, R.~Scheichl, Domain decomposition for multiscale PDEs, Numer. Math. 106 (2007) 589--626.
+\bibitem{gkk} Y.~Gorb, D.~Kurzanova, Y.~Kuznetsov, A robust preconditioner for high-contrast problems, arXiv:1801.01578 (2018).
+\bibitem{henson} V.~E.~Henson, U.~M.~Yang, BoomerAMG: a parallel algebraic multigrid solver and preconditioner, Appl. Numer. Math. 41 (2002) 155--177.
+\bibitem{alcouffe} R.~E.~Alcouffe, A.~Brandt, J.~E.~Dendy, J.~W.~Painter, The multi-grid method for the diffusion equation with strongly discontinuous coefficients, SIAM J. Sci. Stat. Comput. 2 (1981) 430--454.
+\bibitem{lad25} M.~Ladeck\'y 等, Jacobi-accelerated FFT-based solver for smooth high-contrast data, arXiv:2508.02613 (2025).
+\bibitem{amgrev} J.~Xu, L.~Zikatanov, Algebraic multigrid methods, Acta Numer. 26 (2017) 591--721, arXiv:1611.01917.
+\end{thebibliography}
+\end{document}

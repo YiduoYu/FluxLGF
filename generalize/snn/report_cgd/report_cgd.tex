@@ -1,0 +1,77 @@
+\documentclass[11pt,a4paper]{ctexart}
+\usepackage[margin=2.2cm]{geometry}
+\usepackage{amsmath,amssymb,booktabs,float,graphicx,xcolor,hyperref,enumitem}
+\hypersetup{colorlinks=true,linkcolor=blue!50!black,urlcolor=blue!50!black}
+\setlist{itemsep=2pt,topsep=3pt}
+\title{H47：通用粗网格紧缩（CGD）——锁定实验}
+\author{温州肯恩大学 \quad Nonlinear Poisson 项目}
+\date{2026 年 11 月 4 日}
+\begin{document}\sloppy
+\maketitle
+\begin{abstract}
+在 BoomerAMG-PCG 上加一个不需要训练的通用部件：在同一离散的粗网格上用 Lanczos 求 BoomerAMG 处理不好的慢模态，插值到细网格做紧缩；粗网格上若没有慢模态就自动跳过。
+在 4 个参数化各向异性问题族的 66 个未见实例上（$n=511,1023,2047$）测试，方案运行前锁定（哈希 302965ac）。
+结果：效果取决于问题有多难。在 $n\le1023$ 上，BoomerAMG 需要 84 步以上的 8 个实例总时间为 0.41--0.65 倍；40--80 步时大致打平（0.72--1.15）；$n=2047$ 时 6 个 circ/disk 实例中有 3 个更慢，最好的两个为 0.67、0.79。
+自动跳过在 15 个 rot 实例上全部正确。6 条预测中 3 条成立。它不是一个能全面超过 BoomerAMG 的方法，只对“很难”的各向异性实例有明显收益。
+\end{abstract}
+
+\section{方法（运行前锁定）}
+方案 \texttt{snn/protocol\_cgd.md}，sha256 302965ac，2026-11-04T14:11:43Z。
+\begin{enumerate}
+\item 细网格 BoomerAMG（$\theta=0.25$，agg\_nl 0，其余同 H40）。
+\item 同族、同参数在粗网格 $n_c=\max(127,(n+1)/8-1)$ 上重新离散，做 BoomerAMG。
+\item 检测：粗网格上 20 步 Lanczos，最小 Ritz 值 $\ge0.06$ 则直接用普通 PCG。
+\item 否则 40 步 Lanczos，取 Ritz 值 $<0.5$ 的向量（最多 32 个），稀疏双线性插值到细网格，$A$-正交化，紧缩 PCG。
+\end{enumerate}
+时间比 = CGD 全部在线时间 / BoomerAMG（设置+求解）时间。测试种子 2026 此前未使用；参数在单独的开发种子 555 上选（每族 3 个实例），阈值 0.06 的余量很窄，方案中已注明。
+两组计算并行运行（各单线程），计时有约 $\pm10\%$ 的噪声：同一求解器（跳过时 CGD 与 BoomerAMG 完全相同）也出现了 0.96--1.32 的时间比。
+
+\section{结果}
+\begin{figure}[H]
+\centering\includegraphics[width=0.95\linewidth]{cgd_ratio.png}
+\caption{66 个测试实例：时间比与 BoomerAMG 迭代数。BoomerAMG 越吃力，收益越大。}
+\end{figure}
+\begin{table}[H]
+\centering\footnotesize
+\begin{tabular}{llrrrrr}
+\toprule
+问题 & $n$ & 实例 & 时间比中位数 & 范围 & 迭代减少（中位数） & 跳过 \\
+\midrule
+circ & 511 & 6 & 0.74 & 0.60--1.08 & 1.98$\times$ & 1 \\
+circ & 1023 & 6 & 0.91 & 0.51--1.15 & 1.50$\times$ & 1 \\
+circ & 2047 & 3 & 1.24 & 0.67--1.30 & 1.25$\times$ & 0 \\
+disk & 511 & 6 & 0.77 & 0.51--1.07 & 2.22$\times$ & 1 \\
+disk & 1023 & 6 & 0.82 & 0.41--1.01 & 1.66$\times$ & 1 \\
+disk & 2047 & 3 & 1.00 & 0.79--1.12 & 1.28$\times$ & 0 \\
+band & 511 / 1023 / 2047 & 6 / 6 / 3 & 1.06 / 1.01 / 1.06 & 0.94--1.11 & 1.2--1.5$\times$ & 2 / 2 / 1 \\
+rot & 511 / 1023 / 2047 & 6 / 6 / 3 & 1.10 / 1.07 / 1.03 & 0.96--1.32 & 1.00$\times$ & 全部 \\
+\bottomrule
+\end{tabular}
+\end{table}
+真实残差在所有实例上都 $\le 10^{-8}$。
+
+\section{预测检验}
+\begin{enumerate}
+\item circ、disk 时间比中位数 $\le0.75$（511）、$\le0.65$（1023）、$\le0.60$（2047）：\textbf{不成立}（0.76、0.88、1.06）。
+\item circ、disk 在 $n\ge1023$ 迭代至少减半：\textbf{不成立}（1.56$\times$、1.27$\times$）。
+\item rot 至少 5/6 被跳过、时间比中位数 $\le1.10$：\textbf{成立}（全部跳过；1.10、1.07、1.03）。
+\item band 中位数在 $[0.85,1.10]$：\textbf{成立}（1.06、1.01）。
+\item 没有实例超过 1.30：\textbf{不成立}（rot $n=1023$ 的一个跳过实例 1.32，求解器与基线相同，属于计时噪声）。
+\item 所有实例真实残差 $\le1.1\times10^{-8}$：\textbf{成立}。
+\end{enumerate}
+
+\section{分析}
+\begin{itemize}
+\item \textbf{收益取决于难度，而不是问题族。}紧缩把迭代压到 20--60 步左右，但每步多出 $4Nm$ 次运算，还要付粗网格和正交化的一次性成本。BoomerAMG 本身少于约 50 步时，这些成本收不回来；在 $n\le1023$ 上超过 84 步的 8 个实例全部获益（0.41--0.65），但 $n=2047$ 上 85 步的实例反而是 1.30（见下一条）。测试集里中等难度的实例比开发集多，所以中位数没有达到预测。
+\item \textbf{$n=2047$ 变差的原因。}慢模态的个数随 $n$ 增长（报告 13），而 $1/8$ 分辨率的粗网格只能抓住其中最低的十几个，迭代只减少 1.25 倍；同时 420 万未知量上每个紧缩向量每步的成本已接近 V 循环的三分之一。
+\item \textbf{检测器有效但不够细。}rot 上全部正确跳过；但检测只看粗网格，不知道细网格上 BoomerAMG 实际要多少步，所以无法区分“有慢模态但收益小”（band、中等 circ）和“收益大”的情况。
+\end{itemize}
+
+\section{结论与下一步}
+\begin{itemize}
+\item 通用粗网格紧缩不需要训练、不需要知道场线，在 BoomerAMG 很吃力的各向异性实例上（$n\le1023$）能快 1.5--2.4 倍，在 BoomerAMG 不吃力的问题上基本无害（开销 $\le$ 约 10\%，含噪声）。
+\item 但它\textbf{不能全面超过 BoomerAMG}：中等难度时打平，最大规模上更慢。
+\item 可以改进的地方（需要新的锁定实验）：(1) 用细网格上前 10 步 PCG 的实际收敛速度决定是否紧缩，因为它知道真实难度；(2) 粗网格分辨率随 $n$ 增大（如 $n/4$），并只保留真正慢的少数向量；(3) 把紧缩向量做成局部支撑（按场线聚合），降低每步成本。
+\end{itemize}
+\paragraph{代码与数据。}\texttt{FD\_LGF/generalize/snn/}：\texttt{cgd.py}、\texttt{run\_cgd.py}、\texttt{protocol\_cgd.md}；结果 \texttt{results/h47\_\{511,1023,2047\}.csv}；开发集 \texttt{results/dev\_sweep.csv}。
+\end{document}

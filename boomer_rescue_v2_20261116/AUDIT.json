@@ -1,0 +1,13 @@
+{
+  "status": "passed",
+  "measurements": 304,
+  "cases": 30,
+  "locked_hashes_passed": true,
+  "max_residual": 7.969680801014456e-09,
+  "max_repeat_iteration_spread": 0,
+  "skipped_adaptive_records_identical_iterations_to_p8": 42,
+  "operator_groups_with_multiple_RHS_and_identical_ritz_summaries": 6,
+  "activated_records_checked_sparse_nnz_bound": 68,
+  "adaptive_quality_failures": 0,
+  "stderr_records": 0
+}

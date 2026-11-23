@@ -1,0 +1,147 @@
+\documentclass[11pt,a4paper]{ctexart}
+\usepackage[margin=2.1cm]{geometry}
+\usepackage{amsmath,amssymb,booktabs,float,graphicx,xcolor,hyperref,enumitem}
+\hypersetup{colorlinks=true,linkcolor=blue!50!black,urlcolor=blue!50!black}
+\setlist{itemsep=2pt,topsep=3pt}
+\title{审计修复、真实矩阵配对复测与 H56 G8--G11 重跑：对报告 19、21--23 的更正}
+\author{温州肯恩大学 \quad Nonlinear Poisson 项目}
+\date{2026 年 11 月 5 日}
+
+\begin{document}
+\maketitle
+\sloppy
+
+\begin{abstract}
+独立审计（\texttt{FD\_LGF/audit\_20261105/AUDIT.md}）指出：相同的自报残差不代表相同精度，AMG 参数试验可能没有真正改到参数，真实矩阵上的原残差时间没有重复过。本报告修复了相关代码，并用隔离进程重新测量。
+\textbf{在 SC26\_01 上、双双精度原残差 $\|b-Ax\|/\|b\|<10^{-8}$ 的判据下，bt-fd 仍然更快}：5 轮配对的时间比中位数为基线 BoomerAMG 的 0.57 倍（0.56--0.73），为 12 组参数中筛出的 BoomerAMG 的 0.65 倍（0.59--0.70）。部分基线 AMG 运行碰到了 swap，0.57 偏有利，约 0.6--0.65 倍更稳妥。
+调参没有改变胜负。同批比较中 Cholesky 在 5 轮里都快于 LU（0.81 倍，0.74--0.91），支持报告 19 的提交建议，但范围仅限这一个矩阵和这个判据。
+H56 的 G8--G11 用独立进程重跑后，三个 10 胶囊序列仍然都输（1.09--1.67 倍），预测 3 不成立的结论不变；G11 为 6.7 倍，其中 bt-fd 自身因内存不足而换页。
+这些都是探索性复测，没有锁定预测；官方检查程序没有运行。
+\end{abstract}
+
+\section{代码修复}
+\begin{table}[H]
+\centering\small
+\begin{tabular}{p{4.1cm}p{11.8cm}}
+\toprule
+问题 & 处理 \\
+\midrule
+AMG 选项被无条件覆盖 & \texttt{bt\_elim.amg\_defaults} 只写缺失的选项；\texttt{PETSC\_OPTIONS} 注入后 \texttt{ksp.view} 显示生效。\texttt{seq\_lock.py}、\texttt{seq.py}、\texttt{run\_gen.py}、\texttt{ir\_fp128.py}、\texttt{run\_sc.py}、\texttt{multifield/} 同样修改；显式传参的调参脚本（\texttt{generalize/}、\texttt{three\_d/}）不属于这个缺陷 \\
+\texttt{FDMBox} 单层方向忽略边界 & 两端面分别累加。与逐面组装的稠密算子对比，12 个盒子/边界组合全部一致；旧版 7 个失败。失败范围比审计描述的更宽：贴 Robin 面的 Neumann 盒也会错 \\
+\texttt{run\_ir} 结果无法复核 & 分列公共准备、setup、内层求解、DD 残差；记录最终残差、内层 reason、峰值内存；保存 $x_{hi},x_{lo}$、有效配置和输入散列 \\
+未知方法名落入 bt-fd 分支 & 改为报错 \\
+\bottomrule
+\end{tabular}
+\end{table}
+真实矩阵上 bt-fdd 的 4 个盒子都是 41--51 格厚，所以 \texttt{FDMBox} 的缺陷不影响 H55 的真实矩阵结果；H55 自建矩阵未逐一检查。修复前后，$m=12$ 用例的迭代数和残差不变。
+\texttt{rsolve.py}、\texttt{seq\_lock.py} 改动后不再匹配 H56 的 SHA256 清单；运行时的版本保存在 Git 标签 \texttt{h56-lock-sources} 中，取出后清单全部通过。H50、H52、H53、H55 的清单在入库前就已不匹配，无法恢复。
+
+\section{真实矩阵配对复测}
+\paragraph{方法（运行前写入 \texttt{remeasure\_real.py}）。}每次运行一个独立进程、单线程，内层 GMRES(50) 到 $10^{-6}$，外层双双精度迭代修正到原残差 $10^{-8}$。先对审计的 12 组 BoomerAMG 参数各筛查一遍，取最快的一组重新测量，筛查时间不进入比较。4 个方法做 5 轮，每轮内顺序随机，全部结果保留。主指标是 setup + 内层求解 + DD 残差的总时间。
+
+\begin{table}[H]
+\centering\footnotesize\setlength{\tabcolsep}{4pt}
+\begin{tabular}{lrrrrrrrr}
+\toprule
+方法 & 总时间中位数 & 范围 & setup & 求解 & DD 残差 & 内层迭代 & 最终原残差 & 峰值内存 \\
+\midrule
+BoomerAMG 基线 ($\theta=0.5$) & 36.87\,s & 34.7--39.6 & 6.74 & 23.07 & 6.33 & 37 & $4.5\times10^{-10}$ & 4.0\,GB \\
+BoomerAMG 筛选 ($\theta=0.25$) & 34.76\,s & 33.5--36.4 & 7.18 & 21.05 & 6.31 & 34 & $2.4\times10^{-10}$ & 4.1\,GB \\
+bt-fd，MUMPS LU & 22.45\,s & 20.1--25.5 & 6.65 & 9.59 & 6.19 & 16 & $5.6\times10^{-11}$ & 4.3\,GB \\
+bt-fd，CHOLMOD & 18.23\,s & 16.9--20.0 & 5.25 & 7.68 & 5.09 & 16 & $1.2\times10^{-10}$ & 4.8\,GB \\
+\bottomrule
+\end{tabular}
+\caption{SC26\_01，$n=6\,291\,456$，20 次运行全部达标，内层 reason 全为 2，都是 3 步修正。公共准备（DD 表）另需约 0.7\,s。}
+\end{table}
+
+\begin{table}[H]
+\centering\small
+\begin{tabular}{lll}
+\toprule
+配对（同一轮内相除） & 中位数 & 5 轮范围 \\
+\midrule
+bt-fd LU / 基线 AMG & 0.572 & 0.562--0.734 \\
+bt-fd LU / 筛选 AMG & 0.646 & 0.594--0.700 \\
+bt-fd Cholesky / bt-fd LU & 0.812 & 0.737--0.908 \\
+bt-fd Cholesky / 筛选 AMG & 0.525 & 0.500--0.548 \\
+筛选 AMG / 基线 AMG & 0.947 & 0.878--1.048 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{itemize}
+\item \textbf{调参。}筛查时 $\theta=0.25$ 单遍 28.1\,s，重测中位数 34.8\,s，那一遍偏乐观；相对基线约快 5\%，5 轮中有 1 轮更慢。这里只比较了粗化和插值的 12 组参数，没有扫描平滑器，所以结论是“这 12 组没有改变胜负”，不是“BoomerAMG 已调到最优”。
+\item \textbf{LU 与 Cholesky。}迭代数相同，5 轮都是 Cholesky 更快。审计担心的跨批次混淆现在排除了：比值 0.81，报告 19 的跨批次比值是 0.76。自报判据下 Cholesky 需要 53 步的尾部现象这里没有重测。
+\item \textbf{批次差异。}H55 记录的 LU 18.3\,s 和 AMG 29.2\,s 都低于本批最小值（20.1、34.7），两批不应比较绝对秒数。
+\item \textbf{公共准备。}DD 表占约 0.9\,GB 内存但只需 0.7\,s，计入后 LU 与基线的中位数之比只从 0.609 变为 0.617。
+\item \textbf{修正步数是离散的。}时间是首次低于 $10^{-8}$ 的时刻，各方法的最终残差相差最多 8 倍，都比阈值低 1--2 个数量级。比值不是“相同最终残差”下的时间比。
+\end{itemize}
+
+\paragraph{独立核验。}用保存的 $x_{hi},x_{lo}$ 在随机 3000 行上做精确有理数计算，与 DD 残差之差约为 $10^{-20}\|b\|$。舍入成单个 float64 后残差回到 $6.4\times10^{-3}$，所以提交时必须保留高精度解。
+
+\paragraph{干扰。}机器不是完全空闲：Chrome 约占 180\% CPU，覆盖几乎全部配对运行。全系统的 swap 写出量（vm\_stat 的 Swapouts）在 bt-fd 的 10 次运行中都是 0，在 AMG 运行中最多 0.62\,GB，而且不均匀：基线 AMG 中 $\ge0.2$\,GB 的 3 次为 36.9--39.6\,s，$\le0.03$\,GB 的 2 次为 34.7、35.2\,s。所以 36.87\,s 和 0.57 倍对 bt-fd 偏有利；以无 swap 的约 35\,s 计，LU 约为 0.64 倍，与筛选 AMG 的 0.65 倍一致。这个估算是事后的，全部运行仍保留在上表中。这些秒数不是干净机器上的基准。
+
+\section{合成矩阵的反应项}
+\texttt{diag\_reaction.py} 用精确求和计算存储矩阵的行和，再与标称反应项比较（$m=128$，G1 和 G8，相位 0 和 1.35）：
+\begin{table}[H]
+\centering\small
+\begin{tabular}{llll}
+\toprule
+块 & 热核 & 壳层 & 外部 \\
+\midrule
+离子 & $\pm10.2\%$（均方根 2.8\%） & 0 & $\pm2.6\times10^{-6}$ \\
+辐射 & $\pm1.6\times10^{-8}$ & $\pm2\times10^{-14}$ & $\pm1.1\times10^{-8}$ \\
+电子 & 0 & 0 & 0 \\
+\bottomrule
+\end{tabular}
+\end{table}
+审计在 $m=32$ 上看到的偏差在 $m=128$ 上也存在，而且集中在离子块对角约 $10^{17}$ 的热核行。所以 H56 序列除了指定的导热系数变化，还带有这部分舍入扰动。求解存储矩阵的结果仍然有效，但不能说“每步只改变了 $\kappa(T)$”。生成器没有修改，修改会让已有的全部自建矩阵发生变化。
+
+\section{H56 G8--G11 的独立进程重跑}
+\texttt{seq\_isolated.py} 用与 \texttt{seq\_lock.py} 相同的求解器设置、序列和指标（自报残差 $10^{-8}$），只是每种方法单独一个进程。方法顺序逐序列交替，一遍，全部保留。小规模上与 \texttt{seq\_lock.py} 的迭代数和残差完全一致；$m=128$ 上 80 次求解的迭代数也与 H56 逐步相同，全部收敛，两种方法的输入散列相同。
+
+\begin{table}[H]
+\centering\scriptsize\setlength{\tabcolsep}{3pt}
+\begin{tabular}{lrrrrrrrrr}
+\toprule
+序列 & 特征区 & 因子非零元（每块） & bt-fd 总时间 & AMG 总时间 & 时间比 & H56 原比值 & bt-fd 单步 & 峰值内存 & swap 写出 \\
+\midrule
+G8 & 18.4\% & $2.1\times10^{8}$ & 200.0\,s (330.1) & 119.5\,s (194.3) & \textbf{1.67} & 1.70 & 15--30\,s & 7.3\,GB & 0.4\,GB \\
+G9 & 16.3\% & $1.4\times10^{8}$ & 130.3 (156.9) & 120.1 (139.3) & \textbf{1.09} & 1.13 & 11--13 & 6.2 & 0.4 \\
+G10 & 20.3\% & $2.0\times10^{8}$ & 169.9 (349.3) & 113.5 (152.9) & \textbf{1.50} & 2.28 & 14--17 & 7.3 & 0 \\
+G11 & 30.8\% & $3.6\times10^{8}$ & 783.7 (1209.6) & 116.7 (275.8) & \textbf{6.71} & 4.39 & 40--121 & 8.6 & 36\,GB \\
+\bottomrule
+\end{tabular}
+\caption{括号内是 H56 原始值。峰值内存和 swap 写出针对 bt-fd 的运行；swap 写出是运行期间的全系统累计量。特征区是外扩后两块中较大的比例。}
+\end{table}
+
+\begin{itemize}
+\item \textbf{共同驻留确实造成了干扰。}隔离后 AMG 在 4 个序列上都是 113--120\,s（单步约 11\,s），不再出现 55.8\,s 的异常步；bt-fd 的 G8、G10 也回到稳定的单步时间。
+\item \textbf{G8 的比值几乎没变，这是巧合。}原来两种方法被同比例拖慢。审计说它不能作干净基准是对的，但 1.70 这个数接近实际值。
+\item \textbf{G10 明显变小，G11 明显变大。}G11 原来 AMG 也被拖慢，掩盖了差距。
+\item \textbf{G11 的 6.71 是这台 17\,GB 机器上的值，不是纯算法成本。}两块因子各约 $3.6\times10^{8}$ 个非零元，bt-fd 单独运行就在换页，单步 40--121\,s 且随 swap 量波动。按最快一步（39.6\,s）事后估算约 3.7 倍。内存更大的机器上预计会低于 6.71，但仍然输。
+\item \textbf{预测检验不变。}G7--G10 只有 G7 获胜（G7 没有重跑），预测 3 不成立；G11 更慢，预测 4 成立。把这 3 个新值代入后 G1--G10 中位数仍约 0.59（G1--G7 仍是 H56 原值）。迭代数与 H56 相同，预测 1、5 不受影响。
+\end{itemize}
+仍然只有一遍，没有分布；运行期间其他桌面程序（Word、微信等）开着。
+
+\section{对已有报告的更正}
+以下更正已作为说明框加到报告 19、21、22、23 开头，正文未改；未加说明的原始 PDF 保存在 \texttt{总结/原始版本\_审计更正前/}。
+\begin{enumerate}
+\item \textbf{报告 19、21 的自报残差比较}只作诊断，不能写成“相同精度下更快”。审计测得同为自报 $10^{-8}$ 时，bt-fd 的缩放残差约为 AMG 的 2379 倍。精度比较以本报告的原残差结果为准。
+\item \textbf{报告 19 的 0.66 倍}不是固定的性能常数。可以写“bt-fd LU 约为 BoomerAMG 的 0.6--0.65 倍（配对范围 0.56--0.73），这是单个矩阵上的 5 轮配对结果”。
+\item \textbf{报告 19 的“比赛用 Cholesky”}现在有同批证据，但仍然只来自 SC26\_01 和内层 $10^{-6}$，也没有经过官方程序验收。
+\item \textbf{报告 22 第 86 行源文的“在实际的时间推进计算里”}应改为“在所构造的有界系数扰动序列上”。$\delta=0.02$ 时同一点系数比最多 1.041，这个范围不能外推到前沿移动或需要重建的情形。
+\item \textbf{报告 23 的特征区盈亏平衡点。}9.1\% 赢、16.3\% 输只是有限采样，不是分类规则；报告 23 已说明规则未锁定，但“特征区决定胜负”的表述偏强。第 4 节的重跑里，特征区 18.4\% 的 G8（1.67 倍）比 20.3\% 的 G10（1.50 倍）输得更多，稀疏 LU 成本还取决于连通性和填充。
+\item \textbf{报告 23 的 G8--G11 倍数}改用第 4 节的独立进程结果。它的“中位数口径”不能替代重跑：G10 的 2.25 实际约 1.50，G11 的 4.20 实际为 6.71。另外，审计的 78 次扫描（21:35--21:41）当时与 G11 重叠。
+\end{enumerate}
+
+\section{未完成}
+\begin{itemize}
+\item 官方可执行检查程序验收 FP128 解。
+\item bt-fd 匹配容差 0.1 在真实矩阵官方判据下的结果（本报告仍用 H53 的 $10^{-6}$）。
+\item H56 的适用范围：内部单胶囊、物理一致的右端项、热容和交换系数的独立变化。
+\item 下一次锁定用 \texttt{lock\_manifest.py} 生成清单，它会沿 import 找全依赖（\texttt{bt\_elim.py}、\texttt{gen3t.py} 等）；锁定前先提交。
+\end{itemize}
+
+\paragraph{文件。}\texttt{FD\_LGF/audit\_20261105/FIXES.md}；\texttt{FD\_LGF/regions/}：\texttt{remeasure\_real.py}、\texttt{diag\_reaction.py}、\texttt{provenance.py}、\texttt{seq\_isolated.py}、\texttt{lock\_manifest.py}、\texttt{test\_audit\_fixes.py}；结果 \texttt{results/audit\_remeasure/}、\texttt{results/h56\_isolated/}。
+\end{document}

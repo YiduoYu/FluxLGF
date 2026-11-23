@@ -1,0 +1,230 @@
+\documentclass[11pt,a4paper]{ctexart}
+\usepackage[margin=2.2cm]{geometry}
+\usepackage{amsmath,amssymb,booktabs,graphicx,float,xcolor,adjustbox,hyperref}
+\usepackage[section]{placeins}
+\hypersetup{colorlinks=true,linkcolor=blue!50!black,citecolor=blue!50!black,urlcolor=blue!50!black}
+\title{FD-LGF 的改进：让它能解三温辐射扩散这一类问题\\（SolverChallenge26\_01 类型的矩阵）}
+\author{温州肯恩大学 \quad Nonlinear Poisson 项目（H35、H36）}
+\date{2026 年 11 月 3--4 日}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+SolverChallenge26\_01 是激光聚变三维三温能量方程在 $128^3$ 结构网格上的有限体积 7 点离散，矩阵 6,291,456 阶、52,133,888 个非零元。
+真实矩阵文件尚未拿到，本报告的数值都来自一个\textbf{结构完全相同}的替代矩阵（非零元个数逐一相符）。
+\textbf{原始 FD-LGF 不能解这类问题}：系数 $\propto T^{2.5}$，对比度约 $10^{7}$，并且不可分离，98--99\% 的单元都成了“特征”；
+只用背景逆时 3000 次不收敛，标量 Green--Jacobi 缩放也要 1182--1801 次。
+结合文献（Jacobi 加速的 FFT 预条件、高系数区域 deflation、高对比度子块的常系数近似），
+我们保留 FD-LGF 的平衡形式 $P=Q+(I-QA)M(I-AQ)$，把两部分都换掉，得到 \textbf{FD-LGF-3T}：
+$M$ 为逐单元 $3\times3$ 块缩放的 Green 函数（DST）预条件，外加块 Jacobi 光滑；$Q$ 为 box 常数粗空间，递归成多层。
+\textbf{结果：}(1) 迭代数从 1663 降到 27（$m=32$），并且基本与网格无关（$m=64\to128$：$32\to37$、$54\to53$）；
+(2) 与赛题同规模时，两种工况、两个精度目标都能达到，峰值内存 $<6$\,GB（限制 9\,GB），总时间 14--34\,s；
+(3) 比三维参数调好的 BoomerAMG 慢 1.35--1.95 倍，但在 $\Delta t=10$ 时比默认参数的 BoomerAMG 快（14.0 对 30.9\,s，33.8 对 40.8\,s）。
+预注册的 3 条预测全部成立。
+
+\textbf{提速（第 7 节）：}剖析和消融发现，\textbf{在这类问题上 LGF（常系数 Green 函数）部分没有贡献}：
+把它换成 $3\times3$ 块 Jacobi，迭代数不变（32 对 32、54 对 56），每步却省掉了三次三维 DST；
+按其他分位数拟合系数、或只在扩散主导区使用 Green 函数，结果都更差。
+真正起作用的是从 FD-LGF 改进中得到的三样东西：$3\times3$ 块缩放、块光滑和 box 粗空间。
+把它们组织成对称的 V(1,1) 循环、粗层用 W-cycle，并优化实现后，得到 \textbf{agg3t-w}。
+它在与赛题同规模时到 $10^{-4}$ 只要 4.4--4.6\,s，到 $10^{-8}$ 只要 7.4--10.0\,s，
+是三维参数 BoomerAMG 的 0.41--0.58 倍，迭代数与网格无关，内存 $\le4.3$\,GB。
+需要强调：agg3t-w 已经不含 LGF，是由 FD-LGF 一步步消融得到的块缩放聚合多重网格；结果仍只在替代矩阵上得到。
+
+\textbf{非对称（第 8 节）：}在两种非对称替代矩阵上，agg3t-w 都能达到真实残差目标，时间是 BoomerAMG 的 0.39--0.57 倍；
+而 BoomerAMG 在发射线性化、$\Delta t=10$ 时到 $10^{-8}$ 停滞，在行缩放、$\Delta t=10$ 时即使加对角缩放也不收敛。
+\end{abstract}
+
+\tableofcontents
+
+\section{赛题矩阵的结构}
+三温方程（隐式时间步、Picard 线性化后）：
+\begin{align*}
+c_e\tfrac{T_e-T_e^0}{\Delta t}-\nabla\cdot(K_e\nabla T_e)+\omega_{ei}(T_e-T_i)+\omega_{er}(T_e-T_r)&=0,\\
+c_i\tfrac{T_i-T_i^0}{\Delta t}-\nabla\cdot(K_i\nabla T_i)-\omega_{ei}(T_e-T_i)&=0,\\
+c_r\tfrac{T_r-T_r^0}{\Delta t}-\nabla\cdot(K_r\nabla T_r)-\omega_{er}(T_e-T_r)&=0 .
+\end{align*}
+设 $N=128^3$，阶数 $6{,}291{,}456=3N$，所以未知量是三个温度。
+每个温度块是 7 点格式，非零元为 $7N-6\cdot128^2=14{,}581{,}760$；
+同一单元内的电子--离子、电子--辐射交换耦合贡献 $4N$。合计
+\[
+3\times14{,}581{,}760+4\times2{,}097{,}152=52{,}133{,}888,
+\]
+与赛题给的非零元数一字不差（没有离子--辐射耦合）。
+
+\paragraph{替代矩阵（\texttt{surrogate3t.py}）。}真实矩阵不公开（网上查不到下载地址），所以按上式构造了同样稀疏结构的矩阵：
+球形靶丸（内部低密度气体、致密壳层 $\rho=20$、外部 $\rho=0.5$）加一个从 $x=0$ 面推进的辐射波（波前有起伏）和中心热斑；
+$K_e\propto T_e^{2.5}$、$K_i\propto T_i^{2.5}$、$K_r\propto T_r^3/\rho^2$，$\omega_{ei}\propto\rho^2T_e^{-1.5}$、$\omega_{er}\propto\rho^2T_e^{-0.5}$；
+面系数取调和平均。所得矩阵对称正定，并且是 M-矩阵。系数对比度约 $10^7$，交换项占对角元的 0.99--0.9999。
+\texttt{load\_real.py} 和 \texttt{run\_sc.py} 已经可以直接读入真实矩阵（校验 MD5、判断变量排列、对称性和 M-矩阵性质）。
+
+\section{原始 FD-LGF 为什么不行}
+\begin{itemize}
+\item FD-LGF 的前提是“可分离背景 + 小特征”。这里 $K\propto T^{2.5}$ 随温度场连续变化，没有可分离的背景：
+相对于每个温度块的几何平均系数，98--99\% 的单元偏离超过 2 倍。局部 LU 就等于直接分解整个 630 万阶的三维系统，9\,GB 内存放不下。
+\item 只用背景逆（常系数 DST）：3000 次迭代不收敛。
+\item 加标量 Jacobi 缩放（Green--Jacobi，Ladecký 等）：能收敛，但要 1182--1801 次，而且随网格加密增长。
+\item 再加按系数分区的 deflation：仍要 663--1298 次。
+\end{itemize}
+\textbf{诊断：}交换项几乎占满对角元。缩放后每个单元的三个温度之间的耦合系数接近 1，
+任何“按温度分开”的预条件都会在每个单元留下一个“三温相等”的近零模式。
+小特征值的个数和单元数一样多，任何少量向量的粗空间都救不回来。这也是文献中 PCTL（物理量粗化）的出发点。
+
+\section{文献与改进思路}
+\begin{enumerate}
+\item \textbf{Jacobi 加速的 FFT 预条件}（Ladecký、Pultarová、Zeman、Pastewka 等，arXiv:2508.02613）：
+全局 Green 函数预条件串联局部 Jacobi 缩放，保持 $O(N\log N)$，对光滑的高对比度系数有效。
+\item \textbf{高系数区域 deflation}（Vuik、Segal、Meijerink，JCP 1999）：小特征值个数等于不接触 Dirichlet 边界的高传导区域个数；
+用区域常数向量做 deflation 后，迭代数与对比度无关。
+\item \textbf{高对比度子块的常系数近似}（Aksoylu、Graham、Klie、Scheichl，CVS 2008）：对比度足够高时，子块的逆可以用常系数求解近似。
+\item \textbf{三温问题的物理分块}（PCTL，Xu--Mo--An；块三角 AMG，Shu 等 AAMM 2021；物理量 Schwarz，Yue 等 CiCP 2022）：
+必须先处理好单元内的强耦合。
+\end{enumerate}
+关键观察：FD-LGF 的平衡形式 $P=Q+(I-QA)G(I-AQ)$ 与 BNN / 平衡 deflation 是同一结构（Tang、Nabben、Vuik、Erlangga 2009）。
+原来的 $Q$ 是“特征上的精确 LU”；只要把 $Q$ 换成粗空间上的 Galerkin 求解，整个框架就保持不变。
+
+\section{FD-LGF-3T 算法（\texttt{fdlgf3t.py}）}
+\[
+P=Q+(I-QA)\,M\,(I-AQ),\qquad Q=Z\,E^{-1}Z^{T},\quad E=Z^{T}AZ .
+\]
+\paragraph{(a) 逐单元 $3\times3$ 块缩放的 Green 函数 $M_0$。}
+对每个单元的 $3\times3$ 块（三个对角元加交换耦合）做 Cholesky 分解 $B_c=L_cL_c^{T}$，令 $S=\mathrm{blockdiag}(L_c^{-1})$。
+在缩放后的矩阵 $SAS^{T}$ 的每个温度块上，拟合一个常系数有限体积算子 $\kappa(-\Delta_h)+r$，用三维 DST-II 精确求逆，记为 $G_k$：
+\[
+M_0=S^{T}\,(G_1\oplus G_2\oplus G_3)\,S .
+\]
+块缩放精确消去了单元内的强耦合，这是最关键的一步（1663 $\to$ 112 次）。
+每次作用为 3 次正反 DST（$128^3$ 时单线程约 0.15\,s）加两次块对角乘法，内存 $O(N)$。
+
+\paragraph{(b) 块 Jacobi 光滑。}在 $M_0$ 两侧各做一次 $\omega=0.6$ 的块 Jacobi，即
+$I-MA=(I-\omega D^{-1}A)(I-M_0A)(I-\omega D^{-1}A)$，其中 $D^{-1}=S^{T}S$ 是 $3\times3$ 块的精确逆。
+它处理系数跳跃处的高频误差，迭代数再减半（50 $\to$ 27）。
+
+\paragraph{(c) box 常数粗空间 $Q$。}每个温度、每个 $4^3$ 的 box 取一个分片常数向量（$Z$ 为稀疏指示矩阵）。
+$E=Z^TAZ$ 仍然是 $(m/4)^3$ 网格上的三场矩阵，所以递归使用同一个预条件（$128^3\to32^3\to8^3$，最粗层稀疏 LU）。
+递归时粗层做两次迭代（W-cycle）：$E^{-1}\approx2P_c-P_cEP_c$。
+
+\paragraph{性质。}$M$ 对称正定，$P$ 为 BNN 形式，因此对称正定，可以用 CG。
+不需要对特征区域做 LU，内存 $O(N)$。真实矩阵如果不对称，把 Cholesky 换成 $3\times3$ 块 LU、CG 换成 GMRES 即可。
+
+\section{消融（探索性，$m=16,32,64$）}
+\begin{figure}[H]\centering
+\includegraphics[width=\textwidth]{ablation.png}
+\caption{从原 FD-LGF 背景到 FD-LGF-3T，每次只加一个组成部分（到 $\|r\|/\|b\|<10^{-8}$ 的 CG 迭代数，$\Delta t=10^{-3}$）。}
+\end{figure}
+\begin{itemize}
+\item 标量缩放和分区 deflation 只能把迭代数从“不收敛”降到上千次。
+\item $3\times3$ 块缩放把迭代数降低一个数量级，但仍随网格翻倍（53、112、226）。
+\item box 粗空间让迭代数与网格基本无关（40、50、47）。
+\item 块 Jacobi 光滑再减半（21、27、25）；多层 W-cycle 代替精确粗解只多几次（21、27、32）。
+\item 另试过：ADEF2 形式（每步省一次粗解）在近似粗解下更差（43、127 次对 32、54 次）；
+$128^3$ 时用单层 9.8 万阶 LU 做粗解，分解超过 4 分钟，不实用，所以必须多层。
+\end{itemize}
+
+\section{结果}
+\input{tables.tex}
+
+\subsection{预注册预测的检验}
+方案在 $m=128$ 运行前锁定（哈希 eb34886e，2026-11-03T14:26:37Z）。
+\begin{enumerate}
+\item \textbf{成立。}两种工况、两个目标都达到；到 $10^{-8}$ 的迭代数为 37（$\Delta t=10^{-3}$，预测 $\le48$）和 53（$\Delta t=10$，预测 $\le81$；$m=64$ 时为 54）。
+\item \textbf{成立。}整个进程（包括 BoomerAMG 的运行）的峰值内存为 5.3--5.7\,GB，低于 9\,GB。
+\item \textbf{成立。}FD-LGF-3T 的总时间是三维参数 BoomerAMG 的 1.94、1.87 倍（$\Delta t=10^{-3}$，$10^{-4}$/$10^{-8}$）和 1.35、1.95 倍（$\Delta t=10$），
+在 3 倍以内，但没有更快。
+\end{enumerate}
+\paragraph{计时说明。}这次运行期间，H34 的扫描也在同时进行（单线程，8 核机器），各方法受影响相同。
+$\Delta t=10$ 时默认 BoomerAMG 的 setup（22.5\,s）明显比 $\Delta t=10^{-3}$ 时长（12.2\,s），其中一部分可能是负载造成的。
+
+\section{提速（H37）}
+\subsection{时间花在哪里}
+$m=128$ 时，H36 版本的 setup 为 5.6\,s，其中构造 $SAS^{T}$ 用了 2.6\,s，稀疏块缩放矩阵的组装 1.2\,s；
+每次预条件作用 435\,ms，其中三维 DST 约 150\,ms，两侧光滑约 120\,ms，矩阵乘法 30\,ms，粗解 30\,ms。
+
+\subsection{LGF 部分有没有用}
+这是提速前必须先回答的问题。$m=64$ 时：
+\begin{itemize}
+\item 把常系数 Green 函数换成 $3\times3$ 块 Jacobi 的精确逆，迭代数为 32 对 32（$\Delta t=10^{-3}$）、56 对 54（$\Delta t=10$）；
+完全去掉（只剩光滑和粗空间）是 42 和 69 次。
+\item 缩放后各单元的扩散强度呈两极分布：约一半单元几乎没有扩散（由反应或交换项主导），其余几乎是纯扩散。
+用中位数拟合时 Green 函数退化成近似单位阵；按 90\%、99\% 分位数或最大值拟合，迭代数变为 76--169 次；
+只在扩散主导单元上使用 Green 函数（FD-LGF 式的“背景 + 特征”划分），迭代数为 36--104 次。
+\item 原因：扩散主导区内的系数本身也跨越约 7 个数量级（辐射波前、材料界面），常系数 Green 函数在哪里都不是好的近似。
+这与 H18b 的结论一致：Green--Jacobi 在跳跃系数上没有粗空间就不行。
+\end{itemize}
+\textbf{结论：}在三温问题上，FD-LGF 中真正有用的是平衡框架和“用粗空间代替精确局部求解”的思想，以及为多物理耦合加入的块缩放；常系数 Green 函数本身没有贡献。
+
+\subsection{实现优化与形式改变}
+\begin{itemize}
+\item 不再构造 $SAS^{T}$：拟合所需的行和用公式 $\sum_a L_{ka}\odot(A^{\mathrm{off}}_{aa}L_{ka})$ 计算；
+$3\times3$ Cholesky 及其逆用解析公式逐元素计算；块缩放和块逆用数组运算；限制和延拓用稀疏矩阵。$m=64$ 时 setup 从约 3\,s 降到 0.15\,s。
+\item 单精度在 $\Delta t=10$ 时破坏收敛，不采用。
+\item BNN 形式加两侧光滑，每次作用要 4 次细网格矩阵乘法；同样的组成部分改成对称 V(1,1) 循环只需 2 次。
+在 $m=64$ 上扫描 box $\in\{2,4\}$、$\omega\in\{0.5,\dots,1.0\}$、$\nu\in\{1,2\}$、V/W-cycle，
+最优为 box 2、$\omega=0.8$、$\nu=1$、粗层 W-cycle（agg3t-w）。
+\end{itemize}
+
+\subsection{结果}
+\input{tables_speed.tex}
+\paragraph{预注册检验。}
+H37（哈希 e212a666）：预测 1（H36 配置用新代码快 30\%）不成立，只快了 2--10\%；
+预测 2、3（BNN 形式调参后接近或超过 BoomerAMG）不成立，到 $10^{-8}$ 时仍慢 1.3--2.0 倍；
+预测 4（去掉 DST 后更快）成立。
+H37b（哈希 f3f5516d）：4 条预测全部成立。agg3t-w 到 $10^{-8}$ 的迭代为 25 和 36 次（预测 $\le30$、$\le50$）；
+总时间是 BoomerAMG 的 0.41--0.58 倍（预测 $\le0.8$）；新代码下 BNN 版本快了 19--21\%（预测 $\ge15\%$）；峰值内存 $\le4.3$\,GB。
+$m=64$ 的时间步长扫描中，agg3t-w 在 $\Delta t=10^{-5}$ 到 $10^{3}$ 范围内都只要 14--37 次，总时间是 BoomerAMG 的 0.55--0.74 倍。
+
+\section{非对称矩阵（H38）}
+真实的三温矩阵常常不对称。替代矩阵加了两种非对称版本（\texttt{surrogate3t.py}）：
+\begin{itemize}
+\item \textbf{发射线性化（emis）}：电子--辐射交换按发射项 $a(T_e^4-T_r^4)$ 线性化，写成 $\omega_{er}(g_eT_e-g_rT_r)$，
+$g_e=2T_e^3/(T_e^3+T_r^3)$，$g_r=2T_r^3/(T_e^3+T_r^3)$。两侧的耦合系数不同，这是三温矩阵不对称最常见的来源；相对不对称度约 $7\times10^{-5}$。
+\item \textbf{行缩放（scaled）}：每个方程除以自己的 $c/\Delta t$（有的程序会这样归一化），不同行的尺度相差可达 $10^6$。
+\end{itemize}
+agg3t-w 只用到 $3\times3$ 块的逆，非对称时改用伴随矩阵直接求逆；外迭代改用右预条件的 GMRES(50)。
+
+\paragraph{真实残差。}行缩放版上，GMRES 内部的残差估计会偏离真实残差（$m=64$、$\Delta t=10$ 时报告收敛，真实残差却只有 $7.7\times10^{-4}$）。
+因此所有方法统一采用：求解结束后检查原系统的真实残差，未达标就从当前解重启，每次把内部目标收紧 10 倍，重启和迭代都计入时间。
+这一修改在看到任何 H38 结果之前完成，方案随后重新锁定。
+
+\paragraph{探索性结果（$m=64$）。}行缩放版上，普通 BoomerAMG 失效：默认参数要 326/479 次（57/83\,s），三维参数 2000 次不收敛；
+$\Delta t=10$ 时两种参数都不收敛。发射线性化版 $\Delta t=10$ 时，BoomerAMG 到 $10^{-4}$ 正常，但到 $10^{-8}$ 停滞（615--622 次）。
+
+\input{tables_nonsym.tex}
+
+\paragraph{预注册检验（哈希 2ed4bcd5）。}
+\begin{enumerate}
+\item \textbf{成立。}发射线性化版：agg3t-w 在两种 $\Delta t$、两个目标下都达到；时间是 BoomerAMG 的 0.39--0.57 倍；
+$\Delta t=10$、$10^{-8}$ 时 BoomerAMG 500 次不收敛（停在 $3.2\times10^{-8}$），agg3t-w 只要 35 次、11.9\,s。
+\item \textbf{成立。}行缩放版：agg3t-w 在两种 $\Delta t$ 下都达到真实残差目标（$\Delta t=10$、$10^{-8}$ 时重启 1 次，共 133 次迭代）；
+加对角缩放的 BoomerAMG 在 $\Delta t=10^{-3}$ 时慢 1.8--3.4 倍，在 $\Delta t=10$ 时 500 次不收敛（残差 $2.9\times10^{-2}$）。
+\end{enumerate}
+\paragraph{原因。}agg3t-w 的光滑部分是单元 $3\times3$ 块的精确逆，对单元内各行的缩放不变，并且精确处理了交换耦合的不对称；
+粗空间只做 box 求和，不依赖 M-矩阵或对称性假设。经典 AMG 的强连接判据和插值建立在近似 M-矩阵、近似对称的假设上，
+交换项主导对角元时，不对称的耦合会让粗空间失去对应的近零模式。
+
+\section{讨论与下一步}
+\begin{itemize}
+\item \textbf{FD-LGF-3T 能解这一类问题：}迭代数与网格基本无关，对时间步长 $10^{-5}$--$10^{3}$ 稳健（$m=64$ 时 18--54 次），
+内存满足赛题限制，每一层的主体运算都是快速变换。原始 FD-LGF 的“精确背景 + 精确局部”思想没变，只是把“精确局部”换成了“粗空间”，并用块缩放处理多物理耦合。
+\item \textbf{含 LGF 的版本没有超过 BoomerAMG；去掉 LGF 后超过了：}agg3t-w 在替代矩阵上比三维参数 BoomerAMG 快 1.7--2.4 倍（单线程）。
+它快的原因是物理信息：$3\times3$ 块精确处理单元内的交换耦合，box 聚合在结构网格上几乎没有 setup 成本（0.15--1.6\,s，BoomerAMG 为 6\,s）。
+\item \textbf{替代矩阵的局限：}替代矩阵是对称的 M-矩阵，对 BoomerAMG 已经相当有利；
+真实的三温矩阵线性化和行缩放后可能不对称、也不是 M-矩阵。agg3t-w 只用到 $3\times3$ 块的逆、Galerkin 粗空间和块 Jacobi，
+在不对称时把 Cholesky 换成直接求块逆、CG 换成 GMRES 即可，不需要 M-矩阵性质。
+\item \textbf{可以继续提速的地方：}用 C/Cython 或 PETSc 原生的 PCMG 实现，去掉 Python 开销；多线程；
+对 $10^{-4}$ 的目标还可以考虑单精度的 V-cycle（需要先解决 $\Delta t=10$ 时的精度问题）。
+\item \textbf{等真实矩阵：}拿到文件后，先验证锁定在 \texttt{protocol\_real.md} 的 4 条预测，再测试 agg3t-w 和 FD-LGF-3T。
+\end{itemize}
+
+\section*{参考文献}
+\begin{itemize}\small
+\item Ladecký, Pultarová, Bignonnet, Jödicke, Zeman, Pastewka. Jacobi-accelerated FFT-based solver for smooth high-contrast data. \href{https://arxiv.org/abs/2508.02613}{arXiv:2508.02613}.
+\item Vuik, Segal, Meijerink. An efficient preconditioned CG method for the solution of a class of layered problems with extreme contrasts in the coefficients. JCP 152 (1999) 385--403. \href{https://diamhomes.ewi.tudelft.nl/~kvuik/papers/Vui99SM.pdf}{PDF}.
+\item Aksoylu, Graham, Klie, Scheichl. Towards a rigorously justified algebraic preconditioner for high-contrast diffusion problems. CVS 11 (2008). \href{https://link.springer.com/doi/10.1007/s00791-008-0105-1}{doi}.
+\item Shu, Liu, Xu, Yue, Li. Algebraic multigrid block triangular preconditioning for multidimensional three-temperature radiation diffusion equations. AAMM 13 (2021). \href{https://global-sci.com/article/73007/algebraic-multigrid-block-triangular-preconditioning-for-multidimensional-three-temperature-radiation-diffusion-equations}{链接}.
+\item Yue, He, Xu, Shu, Wang. Two physics-based Schwarz preconditioners for three-temperature radiation diffusion equations in high dimensions. CiCP 32 (2022). \href{https://ojs.global-sci.org/index.php/cicp/article/view/7101}{链接}.
+\item Huang, Yue, Xu. $\alpha$Setup-PCTL: an adaptive setup-based two-level preconditioner for sequence of linear systems of three-temperature energy equations. \href{https://global-sci.com/article/79497/asetup-pctl-an-adaptive-setup-based-two-level-preconditioner-for-sequence-of-linear-systems-of-three-temperature-energy-equations}{链接}.
+\item Tang, Nabben, Vuik, Erlangga. Comparison of two-level preconditioners derived from deflation, domain decomposition and multigrid methods. JSC 39 (2009).
+\end{itemize}
+\end{document}

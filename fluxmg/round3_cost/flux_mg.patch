@@ -1,0 +1,121 @@
+--- best/flux_mg.py	2026-11-06 21:28:43
++++ flux_mg.py	2026-11-09 20:43:52
+@@ -22,6 +22,7 @@
+ NU_POST = 1          # black-red sweeps after it
+ ALPHA = 1.0          # scale of coarse faces (0.5 is the rediscretization value for a uniform field)
+ K_THRESH = 0.25      # K-cycle: skip the second GCR step if the residual dropped below this factor
++KMIN_RATIO = 4       # K-cycle only on levels reached by coarsening at least this many cells into one (semi-coarsened levels: V)
+ COARSEST = 32        # solve directly when a level has at most this many cells
+ REACTION = "cluster" # sum: coarse C is the plain sum | cluster: cells weakly tied to the box's strongest cluster count in series
+ THETA = 0.01         # a face is strong if k >= THETA * (largest face inside the box)
+@@ -69,7 +70,9 @@
+     _fields_ = [("nlev", ct.c_int), ("cycle", ct.c_int), ("nu_pre", ct.c_int), ("nu_post", ct.c_int), ("k_thresh", ct.c_double),
+                 ("lev", ct.POINTER(_CLevel)), ("bn", ct.c_int), ("ba", _PD), ("bd", _PD), ("K", ct.c_int), ("nkeep", ct.c_int),
+                 ("keep", ct.POINTER(ct.c_long)), ("lab", ct.POINTER(ct.c_long)), ("ea", _PD), ("ed", _PD), ("coef", _PD), ("wt", _PD),
+-                ("q", _PD), ("r1", _PD), ("z", _PD), ("r2", _PD), ("setup_ops", ct.c_long)]
++                ("q", _PD), ("r1", _PD), ("z", _PD), ("r2", _PD), ("setup_ops", ct.c_long),
++                ("nh", ct.c_long), ("hrow", ct.POINTER(ct.c_long)), ("hlab", ct.POINTER(ct.c_long)), ("hval", _PD),
++                ("ng", ct.c_long), ("grow", ct.POINTER(ct.c_long)), ("glab", ct.POINTER(ct.c_long)), ("gval", _PD), ("wr", _PD), ("sk", _PD), ("gtw", _PD), ("kmin", ct.c_int)]
+ 
+ 
+ _LIB = None
+@@ -492,9 +495,48 @@
+             for round_ in range(ADAPT_ROUNDS):
+                 if not self.adapt_regions(round_):
+                     break
++        if self.K:
++            self.build_HG()
+         if FAST:
+             self.bind_regions()
+ 
++    def build_HG(self):
++        """H = A W and G = A^T W (flat F N x K), assembled in differences like E: faces inside one region add exactly zero.
++        With them the balanced deflation needs no extra matvec: A q = H c and W^T A (q + z) = G^T (q + z)."""
++        L = self.levels[0]
++        F, K = L.F, self.K
++        N = int(np.prod(L.shape))
++        idx = np.arange(N).reshape(L.shape)
++        W = sp.csr_matrix((self.flat_w, (self.flat_keep, self.flat_lab)), shape=(F * N, K))
++        Hs, Gs = [], []
++        for f in range(F):
++            Wf = W[f * N:(f + 1) * N].tocsr()
++            has = np.diff(Wf.indptr) > 0
++            T = sp.csr_matrix((N, K))
++            for a, k in enumerate(L.faces):
++                lo, hi = [slice(None)] * 3, [slice(None)] * 3
++                lo[a], hi[a] = slice(None, -1), slice(1, None)
++                lo, hi = tuple(lo), tuple(hi)
++                ip, iq, v = idx[lo].ravel(), idx[hi].ravel(), k[f].ravel()
++                lp, lq = self.labels[f][lo].ravel(), self.labels[f][hi].ravel()
++                act = (has[ip] | has[iq]) & ~((lp == lq) & (lp >= 0))
++                if not act.any():
++                    continue
++                m = int(act.sum())
++                Dm = (Wf[ip[act]] - Wf[iq[act]]).tocsr()
++                S = sp.csr_matrix((v[act], (ip[act], np.arange(m))), shape=(N, m)) - sp.csr_matrix((v[act], (iq[act], np.arange(m))), shape=(N, m))
++                T = T + S @ Dm
++            Hf, Gf = T, T
++            for g in range(F):
++                Wg = W[g * N:(g + 1) * N]
++                Hf = Hf + sp.diags(L.C[..., f, g].ravel()) @ Wg
++                Gf = Gf + sp.diags(L.C[..., g, f].ravel()) @ Wg
++            Hs.append(Hf); Gs.append(Gf)
++        self.H = sp.vstack(Hs).tocsr(); self.H.eliminate_zeros()
++        self.G = sp.vstack(Gs).tocsr(); self.G.eliminate_zeros()
++        self.W = W
++        self.GtW = np.ascontiguousarray((self.G.T @ W).toarray())         # K x K: W^T A W evaluated through G
++
+     def bind(self):
+         """Hand the hierarchy to the C cycle. All arrays stay owned by Python."""
+         self.lib = _kernel()
+@@ -540,6 +582,7 @@
+         keep += vecs
+         h.q, h.r1, h.z, h.r2 = [_p(v) for v in vecs]
+         h.K = 0
++        h.kmin = KMIN_RATIO
+         self.lib.flux_precond.argtypes = [ct.POINTER(_CHier), _PD, _PD]
+         self.lib.flux_op.argtypes = [ct.POINTER(_CHier), _PD, _PD]
+         self.bind_regions()
+@@ -574,6 +617,15 @@
+         h.nkeep = keepi.size
+         h.keep, h.lab = keepi.ctypes.data_as(ct.POINTER(ct.c_long)), lab.ctypes.data_as(ct.POINTER(ct.c_long))
+         h.ea, h.ed, h.coef = _p(ea), _p(ed), _p(coef)
++        Hc, Gc = self.H.tocoo(), self.G.tocoo()
++        hr, hl, hv = (np.ascontiguousarray(Hc.row, dtype=np.int64), np.ascontiguousarray(Hc.col, dtype=np.int64), np.ascontiguousarray(Hc.data, dtype=float))
++        gr, gl, gv = (np.ascontiguousarray(Gc.row, dtype=np.int64), np.ascontiguousarray(Gc.col, dtype=np.int64), np.ascontiguousarray(Gc.data, dtype=float))
++        wr, sk = np.zeros(self.K), np.zeros(self.K)
++        self._reg += [hr, hl, hv, gr, gl, gv, wr, sk]
++        L64 = ct.POINTER(ct.c_long)
++        h.nh, h.hrow, h.hlab, h.hval = hr.size, hr.ctypes.data_as(L64), hl.ctypes.data_as(L64), _p(hv)
++        h.ng, h.grow, h.glab, h.gval = gr.size, gr.ctypes.data_as(L64), gl.ctypes.data_as(L64), _p(gv)
++        h.wr, h.sk, h.gtw = _p(wr), _p(sk), _p(self.GtW)
+ 
+     def op(self, x):
+         """A x in flux form on the flat vector."""
+@@ -780,7 +832,7 @@
+     def coarse_inner(self, l, r):
+         if l == len(self.levels) - 1:
+             return self.solve_coarsest(r)
+-        if CYCLE == "V":
++        if CYCLE == "V" or np.prod(self.levels[l - 1].ratio) < KMIN_RATIO:
+             return self.cycle(l, r)
+         L = self.levels[l]
+         if CYCLE == "W":
+@@ -816,12 +868,11 @@
+         f = r.reshape((self.fields,) + self.dims)
+         if not self.K:
+             return self.cycle(0, f).ravel()
+-        L = self.levels[0]
+-        q = self.Q(f)                                                     # balanced deflation around one cycle
+-        r1 = f - L.apply(q)
+-        z = self.cycle(0, r1)
+-        r2 = r1 - L.apply(z)
+-        return (q + z + self.Q(r2)).ravel()
++        r = f.ravel()                                                     # balanced deflation around one cycle, A q and
++        wr = np.bincount(self.flat_lab, weights=self.flat_w * r[self.flat_keep], minlength=self.K)   # W^T A z from H and G
++        c = self.E.solve(wr)
++        z = self.cycle(0, (r - self.H @ c).reshape(f.shape)).ravel()
++        return z + self.W @ (c + self.E.solve(wr - self.G.T @ z - self.GtW @ c))
+ 
+     def apply(self, pc, x, y):
+         y.setArray(self(x.getArray(readonly=True)))

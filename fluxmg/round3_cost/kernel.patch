@@ -1,0 +1,91 @@
+--- best/kernel.c	2026-11-06 21:28:43
++++ kernel.c	2026-11-09 20:43:52
+@@ -27,6 +27,11 @@
+     int K; int nkeep; long *keep; long *lab; double *ea, *ed; double *coef; double *wt; /* deflation */
+     double *q, *r1, *z, *r2;
+     long setup_ops;
++    long nh; long *hrow, *hlab; double *hval;  /* H = A W as triplets */
++    long ng; long *grow, *glab; double *gval;  /* G = A^T W as triplets */
++    double *wr, *sk;                   /* K work vectors */
++    double *gtw;                       /* G^T W, K x K row major */
++    int kmin;                          /* K-cycle only below a coarsening of at least kmin cells into one */
+ } Hier;
+ 
+ #define IDX(l, z, y, x) ((((long)(z)) * (l)->ny + (y)) * (l)->nx + (x))
+@@ -76,8 +81,36 @@
+     }
+ }
+ 
++/* one colour of the red-black sweep, one field: same sums in the same order as point_sweep, boundary tests hoisted */
++static void point_sweep1(const Level *l, double *x, const double *rhs, int color) {
++    const int nz = l->nz, ny = l->ny, nx = l->nx;
++    const long nxy = (long)ny * nx;
++    const double *kz = l->kz, *ky = l->ky, *kx = l->kx, *Dinv = l->Dinv;
++    for (int z = 0; z < nz; z++)
++        for (int y = 0; y < ny; y++) {
++            int start = (z + y + color) & 1;
++            long base = IDX(l, z, y, 0);
++            const double *kxr = kx + ((long)z * ny + y) * (nx - 1) - base;      /* kxr[i] is the face between i and i+1 */
++            const double *kym = y > 0 ? ky + ((long)z * (ny - 1) + y - 1) * nx - base : NULL;
++            const double *kyp = y < ny - 1 ? ky + ((long)z * (ny - 1) + y) * nx - base : NULL;
++            const int zm = z > 0, zp = z < nz - 1;
++            for (int xx = start; xx < nx; xx += 2) {
++                long i = base + xx;
++                double s = rhs[i];
++                if (xx > 0) s += kxr[i - 1] * x[i - 1];
++                if (xx < nx - 1) s += kxr[i] * x[i + 1];
++                if (kym) s += kym[i] * x[i - nx];
++                if (kyp) s += kyp[i] * x[i + nx];
++                if (zm) s += kz[i - nxy] * x[i - nxy];
++                if (zp) s += kz[i] * x[i + nxy];
++                x[i] = Dinv[i] * s;
++            }
++        }
++}
++
+ /* one colour of the block red-black sweep */
+ static void point_sweep(const Level *l, double *x, const double *rhs, int color) {
++    if (l->F == 1) { point_sweep1(l, x, rhs, color); return; }
+     const int F = l->F, nz = l->nz, ny = l->ny, nx = l->nx;
+     const long N = (long)nz * ny * nx, nxy = (long)ny * nx;
+     const long kzs = (long)(nz - 1) * nxy, kys = (long)nz * (ny - 1) * nx, kxs = (long)nz * ny * (nx - 1);
+@@ -314,7 +347,8 @@
+ static void coarse_inner(Hier *h, int lv, const double *r, double *x) {
+     Level *l = &h->lev[lv];
+     const long n = l->n;
+-    if (lv == h->nlev - 1 || h->cycle == 1) { cycle(h, lv, r, x); return; }
++    const Level *up = &h->lev[lv - 1];
++    if (lv == h->nlev - 1 || h->cycle == 1 || up->rz * up->ry * up->rx < h->kmin) { cycle(h, lv, r, x); return; }
+     double *c1 = l->w4, *v1 = l->w5, *r1 = l->w6, *c2 = l->w7, *v2 = l->w8;
+     if (h->cycle == 2) {
+         cycle(h, lv, r, x);
+@@ -356,14 +390,21 @@
+     Level *l = &h->lev[0];
+     const long n = l->n;
+     if (!h->K) { cycle(h, 0, r, out); return; }
+-    Q_apply(h, r, h->q);
+-    flux_apply(l, h->q, h->r1);
+-    for (long i = 0; i < n; i++) h->r1[i] = r[i] - h->r1[i];
+-    cycle(h, 0, h->r1, h->z);
+-    flux_apply(l, h->z, h->r2);
+-    for (long i = 0; i < n; i++) h->r2[i] = h->r1[i] - h->r2[i];
+-    Q_apply(h, h->r2, out);
+-    for (long i = 0; i < n; i++) out[i] += h->q[i] + h->z[i];
++    const int K = h->K;
++    double *wr = h->wr, *c = h->coef, *sk = h->sk;
++    memset(wr, 0, sizeof(double) * K);
++    for (long t = 0; t < h->nkeep; t++) wr[h->lab[t]] += h->wt[t] * r[h->keep[t]];        /* W^T r */
++    memcpy(c, wr, sizeof(double) * K);
++    gth_solve(K, h->ea, h->ed, c);
++    memcpy(h->r1, r, sizeof(double) * n);
++    for (long t = 0; t < h->nh; t++) h->r1[h->hrow[t]] -= h->hval[t] * c[h->hlab[t]];   /* r - A W c */
++    cycle(h, 0, h->r1, out);                                                               /* z */
++    memcpy(sk, wr, sizeof(double) * K);
++    for (long t = 0; t < h->ng; t++) sk[h->glab[t]] -= h->gval[t] * out[h->grow[t]];     /* W^T (r - A (W c + z)) */
++    for (int a = 0; a < K; a++) { double s = 0.0; for (int b = 0; b < K; b++) s += h->gtw[(long)a * K + b] * c[b]; sk[a] -= s; }
++    gth_solve(K, h->ea, h->ed, sk);
++    for (int a = 0; a < K; a++) sk[a] += c[a];
++    for (long t = 0; t < h->nkeep; t++) out[h->keep[t]] += h->wt[t] * sk[h->lab[t]];
+ }
+ 
+ void flux_op(Hier *h, const double *x, double *y) { flux_apply(&h->lev[0], x, y); }

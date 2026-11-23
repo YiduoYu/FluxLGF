@@ -1,0 +1,20 @@
+{
+  "python": "3.10.22 | packaged by conda-forge | (main, Oct  6 2026, 22:55:54) [Clang 19.1.7 ]",
+  "platform": "macOS-27.2.1-arm64-arm-64bit",
+  "machine": "arm64",
+  "numpy": "2.2.6",
+  "scipy": "1.15.2",
+  "pyamg": "5.3.0",
+  "petsc": [
+    3,
+    25,
+    6
+  ],
+  "threads": {
+    "OMP_NUM_THREADS": "1",
+    "OPENBLAS_NUM_THREADS": "1",
+    "MKL_NUM_THREADS": "1",
+    "VECLIB_MAXIMUM_THREADS": "1"
+  },
+  "recorded_utc": "2026-11-17T02:19:01.461140+00:00"
+}

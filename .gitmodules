@@ -1,0 +1,3 @@
+[submodule "lgf-cnn"]
+	path = dependencies/lgf-cnn
+	url = https://github.com/YiduoYu/LGF-CNN-Nonlinear-Poisson.git

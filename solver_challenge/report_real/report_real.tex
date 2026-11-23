@@ -1,0 +1,153 @@
+\documentclass[11pt,a4paper]{ctexart}
+\usepackage[margin=2.2cm]{geometry}
+\usepackage{amsmath,amssymb,booktabs,graphicx,float,xcolor,multirow,hyperref}
+\usepackage[section]{placeins}
+\hypersetup{colorlinks=true,linkcolor=blue!50!black,citecolor=blue!50!black,urlcolor=blue!50!black}
+\title{FD-LGF 在真实 SolverChallenge26\_01 矩阵上的测试}
+\author{温州肯恩大学 \quad Nonlinear Poisson 项目（H39、H40）}
+\date{2026 年 11 月 4 日}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+我们在真实的 SolverChallenge26\_01 矩阵（628 万阶，三温耦合，不对称）上测试了 FD-LGF 和 BoomerAMG。
+真实矩阵与此前的替代矩阵差别很大：约 95\% 的单元是常系数背景，系数变化集中在角上的一个 1/8 球内，这正适合 FD-LGF。
+按此结构重新设计的 FD-LGF（快速对角化背景 + 特征区 MUMPS 精确解）用 14 步 GMRES 迭代达到 $10^{-8}$，内存 5.8\,GB，迭代次数和精度都达到预期；
+但总时间 81.9\,s，是 BoomerAMG（18.1\,s）的 4.5 倍，其中 42\,s 花在特征区的 LU 分解上。
+此前为替代矩阵设计的方法（pctl、split-sym、fdlgf-G、fdlgf-GJ）和 agg3t-w 在真实矩阵上全部不收敛。
+另外，$\|b-Ax\|/\|b\|<10^{-4}$ 在双精度下无法达到（下限约 $10^{-2}$），因此按你的选择以求解器自报残差判断收敛。
+\end{abstract}
+
+\section{数据}
+数据集为赛题包 SolverChallenge26-tenproblems 中的 \texttt{solverchallenge26\_01.7z}，与赛题一致；压缩包 MD5 为 \texttt{c0d0a33e\allowbreak 199a7746\allowbreak b0d9ba62\allowbreak 396a0e79}。
+解压后是 PETSc 二进制格式的矩阵 $A$（6,291,456 阶，52,133,888 个非零元）和右端项 $b$。读入约 3\,s。
+
+\section{真实矩阵的结构}
+\begin{itemize}
+\item 三个温度按块存放 $[T_1;T_2;T_3]$，每块是 $128^3$ 网格上的 7 点格式。耦合只有 $T_1$--$T_2$ 和 $T_2$--$T_3$，$T_2$ 是中心
+（替代矩阵里中心是第一块）。没有正的非对角元。
+\item \textbf{不对称。}三个对角块和 $T_2$--$T_3$ 耦合严格对称，但 $a_{12}/a_{21}\approx1.2\times10^{12}$，并且这个比值随单元变化（$2.3\times10^{10}$--$1.2\times10^{12}$），
+所以不是“对称矩阵乘行缩放”。全局指标 $\max|A-A^T|/\max|A|=9.8\times10^{-12}$ 看起来很小，只是因为 $\max|A|=1.8\times10^{17}$，掩盖了不对称。
+\item \textbf{常系数背景 + 一个局部特征。}约 95\% 的单元上，每个温度块都是常系数扩散加常数反应项，外边界为对称面（Neumann），
+$T_1$ 在 $x,y,z=127$ 三个远端面上另有一个很弱的 Robin 项（每个面 $\beta=1.92\times10^6$，可叠加）；
+$T_1$ 行还有一个处处相同的单向耦合 $-e_{12}T_2$（$e_{12}=963$，占 $T_1$ 反应项的 99\%），其余耦合在背景区都小于对角元的 $2\times10^{-11}$。
+所有系数变化和交换耦合都集中在原点角上半径约 57 格的 1/8 球内，另有约 2,000 个立方体棱附近的边界单元（背景拟合没有完全复现这些行），合计约占 4.8\% 的单元。
+\item \textbf{球内对比度极高：}$T_1$ 面系数 $10^{-6}$--$10^{10}$（$10^{16}$），$T_3$ 面系数 $7\times10^{-4}$--$3\times10^{16}$（$4\times10^{19}$）。
+$T_1$、$T_3$ 几乎是纯扩散（反应项约为对角元的 $10^{-10}$），$T_2$ 以反应项为主。
+\end{itemize}
+\begin{figure}[H]
+\centering
+\includegraphics[width=\linewidth]{structure.png}
+\caption{$z=0$ 截面（穿过角上的球），颜色为 $\log_{10}$。白线围住的是背景区；白线以外（左下角的球和沿截面四边约 4 格宽的条带）是 FD-LGF 的特征区 $F$，在其上做精确 LU。
+球内 $T_1$、$T_3$ 的面系数跨越 16--20 个数量级；耦合比 $a_{12}/a_{21}$ 处处约为 $10^{12}$，说明矩阵不对称。}
+\label{fig:structure}
+\end{figure}
+这正是原始 FD-LGF 的适用场景（可分离背景 + 小特征）。替代矩阵在这一点上完全错了：替代矩阵中 98--99\% 的单元偏离背景。
+
+\section{精度下限：$\|b-Ax\|/\|b\|<10^{-4}$ 在双精度下达不到}
+约 2.6 万行 $T_3$ 的对角元为 $1.5$--$1.8\times10^{17}$，几乎被邻居抵消。我们做了三个检验：
+\begin{enumerate}
+\item 把 BoomerAMG 解 $x$ 的每个分量随机改动 1 个 ulp（双精度能表示的最小变化），精确残差改变 $2.2\times10^{-2}\|b\|$。
+所以即使把精确解舍入到双精度，残差也在 $10^{-2}$ 量级。
+\item BoomerAMG + GMRES 自报残差 $1.2\times10^{-11}$，用有理数逐行精确求和得到的真实残差为 $7.3\times10^{-3}$，几乎全部来自 $T_3$。
+\item 同一个解的对角缩放残差 $\|D^{-1}(b-Ax)\|/\|D^{-1}b\|=2\times10^{-16}$，范数后向误差 $4\times10^{-17}$，分量后向误差 $2\times10^{-14}$：解本身已经精确到机器精度。
+\end{enumerate}
+因此按 $\|b-Ax\|_2/\|b\|_2$ 判断收敛，任何求解器都只能停在约 $10^{-2}$；第一次运行（H39）中 BoomerAMG 重启 10 次仍停在 $8\times10^{-3}$，就是这个原因。
+\textbf{收敛判据（按你的选择）：}以求解器自报的残差为准（PETSc GMRES(50)、右预条件、无预条件范数，$x_0=0$），同时记录真实残差和对角缩放残差，用来发现假收敛。
+
+\section{针对真实结构的 FD-LGF（\texttt{fdlgf\_real.py}）}
+\[
+P=Q+(I-QA)\,G\,(I-AQ),\qquad Q=R_F^{T}A_{FF}^{-1}R_F .
+\]
+\paragraph{背景逆 $G$。}每个温度块的背景算子为 $A_{\mathrm{bg},k}=\kappa_k(T\otimes I\otimes I+I\otimes T\otimes I+I\otimes I\otimes T)+r_k I$，
+$T$ 是 Neumann 一维图拉普拉斯（$T_1$ 在远端加 $\beta/\kappa$）。$\kappa_k,r_k,\beta$ 取中位数拟合。
+用快速对角化方法（FDM，即 H16 的可分离广义 LGF）精确求逆：$T=V\Lambda V^T$，每个方向一次 $128\times128$ 矩阵乘法。
+背景是块下三角的（只有 $e_{12}$），按 $T_2$、$T_3$、$T_1$ 的顺序求解。每次 3 个 FDM，在小网格上验证为精确逆（误差 $10^{-14}$）。
+\paragraph{局部精确解 $Q$。}特征区 $F$：任一温度的行与背景之差超过该行最大元的 $10^{-6}$ 的单元（100,211 个，4.8\%），外扩 4 格（6.4\%），
+三个温度一起，共 403,275 个未知量；$A_{FF}$ 用 MUMPS（METIS 排序）做 LU 分解。
+\paragraph{设计在运行前锁定。}容差、外扩宽度和 LU 都在 H40 方案（哈希 00c25a23）中预先固定，没有在这个矩阵上调参。
+
+\section{结果}
+所有求解器单线程（\texttt{OMP/VECLIB/OPENBLAS\_NUM\_THREADS=1}）、依次运行；GMRES(50)，右预条件，$x_0=0$，最多 2000 步。
+“真实”是 $\|b-Ax\|_2/\|b\|_2$（双精度计算），“缩放”是对角缩放残差 $\|D^{-1}(b-Ax)\|/\|D^{-1}b\|$。
+
+\begin{table}[H]
+\centering
+\small
+\begin{tabular}{llrrrrrrr}
+\toprule
+方法 & 目标 & 迭代 & 自报残差 & 真实 & 缩放 & 设置 (s) & 求解 (s) & 总计 (s) \\
+\midrule
+\multirow{2}{*}{BoomerAMG（amg-3d）} & $10^{-4}$ & 15 & 8.5e-5 & 1.3e-2 & 8.2e-9 & 5.8 & 8.0 & \textbf{13.8} \\
+ & $10^{-8}$ & 23 & 4.8e-9 & 1.3e-2 & 3.9e-13 & 5.8 & 12.3 & \textbf{18.1} \\
+\multirow{2}{*}{BoomerAMG（默认）} & $10^{-4}$ & 6 & 8.8e-5 & 1.4e-2 & 7.5e-9 & 20.4 & 17.9 & 38.2 \\
+ & $10^{-8}$ & 10 & 1.4e-9 & 1.4e-2 & 1.6e-13 & 18.4 & 18.2 & 36.6 \\
+\multirow{2}{*}{\textbf{FD-LGF-real}} & $10^{-4}$ & 6 & 2.0e-5 & 3.9e-2 & 1.2e-7 & 48.0 & 10.2 & 58.2 \\
+ & $10^{-8}$ & 14 & 1.0e-8 & 3.8e-2 & 1.2e-9 & 44.6 & 37.4 & 81.9 \\
+\midrule
+agg3t-w & $10^{-4}$ & 150 & 0.90 & 1.1 & 0.71 & 1.6 & 46.2 & 失败 \\
+pctl & $10^{-4}$ & 50 & 4.7e-3 & 2.8 & 5.3e-5 & 24.3 & 283 & 失败 \\
+split-sym & $10^{-4}$ & 50 & 4.6e-4 & 3.6 & 1.0e-6 & 1.1 & 368 & 失败 \\
+fdlgf-GJ & $10^{-4}$ & 2000 & 1.0 & 1.0 & 1.0 & 2.6 & 584 & 失败 \\
+fdlgf-G & $10^{-4}$ & 2000 & 0.996 & 0.996 & 1.0 & 1.4 & 619 & 失败 \\
+\bottomrule
+\end{tabular}
+\caption{真实矩阵上的结果。下半部分的方法在 $10^{-8}$ 下同样失败（未列出）。agg3t-w、pctl、split-sym 是 GMRES breakdown 提前终止，
+fdlgf-G、fdlgf-GJ 跑满 2000 步。amg-3d 跑了两次，表中是第二次（第一次 15.1\,s / 19.8\,s，相差约 10\%）。}
+\label{tab:results}
+\end{table}
+
+\paragraph{FD-LGF-real 的时间花在哪里。}单独测量（单线程）：
+\begin{itemize}
+\item 设置 45\,s，其中 MUMPS 分解 $A_{FF}$（403,275 阶，325 万非零元）占 42\,s；背景拟合 0.6\,s，抽取 $A_{FF}$ 0.07\,s。
+\item 一次预条件 1.15\,s：两次局部求解 $Q$ 各约 0.2--0.3\,s（首次 0.87\,s），背景逆 $G$（3 个 FDM）0.34\,s，两次 $A$ 乘向量各 0.12\,s。
+\end{itemize}
+所以背景逆本身很便宜，瓶颈是特征区的精确 LU。即使不算设置，FD-LGF-real 的求解时间（37.4\,s）也已经超过 BoomerAMG 的总时间。
+
+\section{预注册预测的检验}
+\subsection*{H40（方案哈希 00c25a23，运行前锁定）}
+\begin{enumerate}
+\item BoomerAMG 达到两个目标，$10^{-8}$ 时缩放残差 $<10^{-6}$：\textbf{成立}（$3.9\times10^{-13}$）。
+\item agg3t-w 在 2000 步内达不到 $10^{-4}$：\textbf{成立}（第 150 步 breakdown，自报残差 0.90）。
+\item FD-LGF-real 达到两个目标，到 $10^{-8}$ 不超过 15 步，缩放残差 $<10^{-6}$，内存 $<9$\,GB：\textbf{成立}（14 步，$1.2\times10^{-9}$，5.76\,GB）。
+\item FD-LGF-real 在 $10^{-8}$ 的总时间不超过最好的 BoomerAMG：\textbf{不成立}（81.9\,s 对 18.1\,s，慢 4.5 倍）。
+\item H35 的预测按锁定内容在本判据下检验，见下。
+\end{enumerate}
+\subsection*{H35（拿到矩阵之前锁定）}
+\begin{enumerate}
+\item fdlgf-G 2000 步内达不到 $10^{-4}$，并且每个温度块 $\ge90\%$ 的单元偏离几何平均面系数 2 倍以上：\textbf{不成立}。
+前半句对（残差停在 0.996），后半句错（实际只有 1.5\%--4.4\% 的单元偏离）。这个预测是按替代矩阵的结构写的。
+\item fdlgf-GJ 到 $10^{-8}$ 的迭代数至少是 BoomerAMG 的 10 倍：\textbf{成立}（2000 步未收敛，BoomerAMG 10 步）。
+\item 整体 BoomerAMG 在两个目标上都最快，且内存 $<9$\,GB：\textbf{成立}（amg-3d 13.8\,s / 18.1\,s，峰值内存 4.3\,GB）。
+\item 矩阵是 M 矩阵（没有正的非对角元），预测 BoomerAMG 到 $10^{-8}$ 不超过 30 步：\textbf{成立}（amg-3d 23 步，默认参数 10 步）。
+\end{enumerate}
+注意：H35 写作时默认按真实残差判断。若按真实残差，任何方法都达不到（H39 中 BoomerAMG 停在 $8\times10^{-3}$），第 3、4 条将无法检验。
+
+\section{需要说明的问题}
+\begin{itemize}
+\item \textbf{一次程序错误。}FD-LGF-real 第一次运行时，在第一次调用预条件子时崩溃：PETSc 传入的向量是只读的，代码按可写方式读取。
+只把这一行改成只读读取，没有改任何设计或参数，然后重跑。崩溃记录保存在 \texttt{results/h40\_main\_crash.log}。
+\item \textbf{计时环境。}机器上还有其他进程，运行期间负载在 3.5--7 之间（第一批开始时约 26）。amg-3d 两次运行相差约 10\%，结论（FD-LGF-real 慢 4.5 倍）不受影响。
+\item \textbf{实现语言不同。}BoomerAMG 是 C 实现；FD-LGF-real 通过 petsc4py 的 Python 预条件子调用，每步有数组拷贝等额外开销。
+到 $10^{-8}$ 时每步实测约 2.7\,s，而单独测得的一次预条件（1.15\,s）加一次矩阵乘向量（0.12\,s）只有约 1.3\,s；
+差额可能来自首次调用的预热、GMRES 正交化和数据拷贝，没有进一步分析。即使把求解时间减半，总时间（约 63\,s）仍是 BoomerAMG 的 3.5 倍。
+\item \textbf{自报残差相同，解的精度不同。}同样自报到 $10^{-8}$，FD-LGF-real 的缩放残差（$1.2\times10^{-9}$）比 BoomerAMG（$3.9\times10^{-13}$）差约 3000 倍。
+原因是无预条件残差范数几乎完全由 $T_3$ 中对角元约 $10^{17}$ 的那些行决定，自报残差对其余行的误差不敏感；
+两种预条件子对其余行的处理精度不同，结果就不同。按你选的判据两者都算达标，但 BoomerAMG 的解更准。
+\end{itemize}
+
+\section{结论与下一步}
+\begin{itemize}
+\item 真实矩阵的结构（常系数背景 + 小特征）正好适合 FD-LGF，按此重新设计后迭代数达到了预期（14 步），这验证了“精确背景逆 + 局部精确解”这个思路本身。
+\item 但目前它不如 BoomerAMG：时间慢 4.5 倍，主要因为特征区占 6.4\% 的单元，403,275 个未知量的精确 LU 要 42\,s。
+\item 为替代矩阵设计的方法在真实矩阵上全部失败，说明替代矩阵与真实问题差别太大，以后不应再以替代矩阵上的结果为依据。
+\end{itemize}
+可以尝试的改进（都需要先锁定方案再测）：
+\begin{enumerate}
+\item \textbf{缩小或分解特征区。}特征区的 1/8 球内三个温度强耦合，可以只在真正的强变化层用 LU，把外扩宽度从 4 格减到 1--2 格；或把立方体棱附近那约 2,000 个边界单元改进背景拟合后剔除。
+\item \textbf{特征区改用非精确解。}用 BoomerAMG 只解 $A_{FF}$（规模只有全矩阵的 6\%），或用 MUMPS 的低秩（BLR）分解，以 $Q$ 的精度换设置时间。
+\item \textbf{把 FDM 背景逆当作 BoomerAMG 的补充}，例如作为两级方法中的一级，而不是单独和 BoomerAMG 比。
+\end{enumerate}
+
+\end{document}

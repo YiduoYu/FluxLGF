@@ -1,0 +1,67 @@
+\documentclass[11pt,a4paper]{ctexart}
+\usepackage[margin=2.2cm]{geometry}
+\usepackage{amsmath,amssymb,booktabs,float,xcolor,hyperref,enumitem}
+\hypersetup{colorlinks=true,linkcolor=blue!50!black,urlcolor=blue!50!black}
+\setlist{itemsep=2pt,topsep=3pt}
+\title{H46（探索）：用 SNN 预测 BoomerAMG 的慢模态做紧缩——各向异性问题}
+\author{温州肯恩大学 \quad Nonlinear Poisson 项目}
+\date{2026 年 11 月 4 日}
+\begin{document}\sloppy
+\maketitle
+\begin{abstract}
+本报告是\textbf{探索性}的，没有事先锁定方案，所有结论都需要后续锁定实验确认。
+我们先修正了 H45 在各向异性问题 circ 上的两个错误：基线应为 PCG + BoomerAMG（不开 aggressive coarsening），$n=511$ 时 86 步而不是 429 步；H45 的慢模态紧缩结论来自一个 Lanczos 数值错误。
+修正后，紧缩 16 个真实慢模态可以把 86 步降到 30 步，上限确实很大。
+但 4 种 SNN 训练方式预测出的子空间都不够精确，在 $n=511$ 的新几何上几乎不减少迭代（93$\to$91 步）。
+反而不用神经网络的通用做法——在粗网格（$127^2$）上用 Lanczos 求慢模态、插值到细网格——在 circ 和 disk 上把迭代减少 2--3 倍，总时间为 BoomerAMG 的 0.56--0.94 倍；在 BoomerAMG 本来就不吃力的 band、rot 上则更慢。
+\end{abstract}
+
+\section{修正与准备}
+\begin{itemize}
+\item \textbf{torch\_env 崩溃}：原因是这台 macOS 上 libomp 多线程初始化失败（\texttt{pthread\_mutex\_init failed}），设 \texttt{OMP\_NUM\_THREADS=1} 即可。另把 torch 2.7.1 装进 hypre\_env，使 torch 与 BoomerAMG 在同一进程。
+\item \textbf{基线}：circ 矩阵对称正定，应使用 PCG；aggressive coarsening（agg\_nl=1，H40 的设置）在这里差 3--4 倍。PCG + $\theta=0.25$、agg\_nl=0：$n=127/255/511$ 分别 33/55/86 步。
+\item \textbf{Lanczos 错误}：在 $A$ 内积下做 Lanczos 时，用递推更新 $Aw$ 会丢失正交性（$\mathrm{cond}(A)\sim10^8$），出现负的“特征值”。每次重正交后重新计算 $Aw$ 后与稠密矩阵结果一致。H45 中 circ 的 D1 结论因此作废。
+\end{itemize}
+
+\section{上限与慢模态的结构（circ，$\chi=10^4$）}
+\begin{itemize}
+\item $n=511$：紧缩 $k=8/16/32$ 个真实慢模态，迭代 86$\to$45/30/23，求解时间 2.13\,s$\to$0.84\,s（$k=16$）。
+\item 前 16 个慢模态完全是半径的函数（沿场线为常数）。特征值小于 0.1 的个数随 $n$ 增长：4、8、17。
+\item \textbf{目标必须针对预条件后的算子}：$A$ 自身最低的特征向量在 circ 上能抓住慢模态（$m=32$：29 步），但在 disk 上不行（$m=16$：35 步，真实慢模态 13 步）。
+\item \textbf{可迁移性}：慢模态子空间可以跨网格迁移（$127\to255$ 几乎无损），几乎不随 $\chi$ 变化（$\chi$ 乘或除以 10 结果相同），但强烈依赖几何（圆心移动后，用原几何的慢模态：44 步，基线 46 步）。所以网络必须学会几何依赖。
+\end{itemize}
+
+\section{SNN 的尝试}
+网络 $\Phi(x,y;p)$ 输出 $M=32$ 个基函数（SNN 的子空间层），$p$ 为几何参数；SNN 中输出层的最小二乘步对应紧缩 PCG 里的 Galerkin 粗解。训练只用矩阵 $A$、BoomerAMG 和坐标。
+\begin{enumerate}
+\item \textbf{无监督 Ritz 损失}（最小化 $BA$ 在 $\mathrm{span}\,\Phi$ 上的 Ritz 值）：只在 $G$ 上加正则时，网络用几乎共线的列“作弊”（损失 0.2，真实 Ritz 值 0.85）；按 $A$ 范数归一化后诚实但很慢，因为慢模态正是 $A$ 能量小的组合；改为欧氏 QR 加精确 Ritz 值后完全诚实，但 200 步只从 0.83 降到 0.82。
+\item \textbf{监督式子空间最小二乘}：先用 Lanczos 在 $n=255$ 的训练实例上求 32 个最慢模态，损失为它们落在 $\mathrm{span}\,\Phi$ 之外的能量比例。16 个训练实例、1000 步后：普通 MLP 0.58，加 Fourier 特征 0.42，场线坐标结构（$\Phi_k=w\cos(k\pi s)$，$s,w$ 由网络学）0.34。
+\item \textbf{测试（$n=511$，3 个新几何）}：场线坐标 SNN 93/76/52$\to$91/74/52 步；Fourier SNN 91/69/48 步。没有实际收益，而网络推断和正交化还要额外 0.6--1.4 倍基线时间。紧缩需要几乎精确的慢模态，只捕获 60\% 能量的子空间去不掉小特征值。
+\end{enumerate}
+
+\section{非神经网络对照：粗网格 Lanczos 紧缩}
+对每个实例，在 $n_c=127$ 的同族离散上做 100 步 Lanczos，取 32 个最慢模态，双线性插值到细网格做紧缩（计入全部在线时间）。
+\begin{table}[H]
+\centering\footnotesize\setlength{\tabcolsep}{3pt}
+\begin{tabular}{lll l l}
+\toprule
+问题 & $n$ & BoomerAMG 迭代 & 粗网格 Lanczos 迭代（时间比） & 真实慢模态迭代（时间比） \\
+\midrule
+circ & 511 & 93 / 76 / 52 & 30 / 30 / 27 \;(0.81 / 0.85 / 1.12) & 24 / 23 / 22 \;(0.36 / 0.43 / 0.58)\\
+disk & 511 & 78 / 67 / 39 & 24 / 21 / 18 \;(0.94 / 0.94 / 1.39) & 14 / 15 / 13 \;(0.31 / 0.37 / 0.53)\\
+band & 511 & 32 / 40 / 40 & 22 / 23 / 23 \;(2.00 / 1.47 / 1.43) & 14 / 16 / 17 \;(0.65 / 0.60 / 0.61)\\
+rot & 511 & 17 / 23 / 26 & 16 / 21 / 23 \;(2.48 / 1.92 / 1.89) & 14 / 18 / 20 \;(0.95 / 0.91 / 0.93)\\
+circ & 1023 & 164 / 111 & 56 / 50 \;(0.56 / 0.74) & -- \\
+\bottomrule
+\end{tabular}
+\caption{3 个（$n=1023$ 为 2 个）未见过的几何，$\chi\in[10^3,10^5]$。时间比为在线总时间 / BoomerAMG 总时间；真实慢模态一列不计求模态的时间，只是上限。}
+\end{table}
+
+\section{结论}
+\begin{itemize}
+\item 在各向异性问题上，“紧缩 BoomerAMG 的慢模态”确实有 2--3 倍的上限，问题规模越大收益越大（$n=1023$ 的 circ 已有 0.56 倍）。
+\item 这些慢模态可以\textbf{通用地}得到：只需要在粗网格上做同一离散，再用 Lanczos。它不需要知道场线，也不需要训练。目前的问题是开销：BoomerAMG 本来就只要 20--40 步的问题（band、rot），Lanczos 的成本收不回来。
+\item 用 SNN 直接预测慢模态，在我们试过的设置下精度远远不够（最好只捕获 66\% 能量），没有收益。要让神经网络有用，至少需要更多训练数据和更长训练，或者只让它给 Lanczos 提供初始块（减少粗网格 Lanczos 的步数），而不是直接替代。
+\end{itemize}
+\paragraph{代码与记录。}\texttt{FD\_LGF/generalize/snn/}（\texttt{snn\_defl.py}、\texttt{train\_sup.py}、\texttt{evaluate.py}、\texttt{NOTES\_explore.md}），结果在 \texttt{snn/results/}。
+\end{document}

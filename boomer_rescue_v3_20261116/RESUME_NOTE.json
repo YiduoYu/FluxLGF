@@ -1,0 +1,6 @@
+{
+  "resumed_utc": "2026-11-17T01:59:58.351713+00:00",
+  "completed_rows_before_resume": 132,
+  "reason": "Previous execution session no longer available; output unchanged for approximately 11 hours. Resume missing job identities using unchanged locked source.",
+  "timing_caveat": "Wall-clock medians mix two execution sessions on the same environment; CPU ratios and within-group ranges must be reported."
+}

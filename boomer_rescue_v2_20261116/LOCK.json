@@ -1,0 +1,443 @@
+{
+  "created_utc": "2026-11-16T13:40:19.106475+00:00",
+  "cases": {
+    "validate511": [
+      {
+        "fam": "circ",
+        "n": 511,
+        "chi": 1000.0,
+        "p": [
+          0.7656288838589407,
+          0.3372415168799172,
+          0.637114939501179
+        ],
+        "rhs": 3,
+        "rhs_seed": 8713
+      },
+      {
+        "fam": "circ",
+        "n": 511,
+        "chi": 1000.0,
+        "p": [
+          0.7656288838589407,
+          0.3372415168799172,
+          0.637114939501179
+        ],
+        "rhs": 4,
+        "rhs_seed": 8713
+      },
+      {
+        "fam": "circ",
+        "n": 511,
+        "chi": 100000.0,
+        "p": [
+          0.7656288838589407,
+          0.3372415168799172,
+          0.637114939501179
+        ],
+        "rhs": 3,
+        "rhs_seed": 8713
+      },
+      {
+        "fam": "circ",
+        "n": 511,
+        "chi": 100000.0,
+        "p": [
+          0.7656288838589407,
+          0.3372415168799172,
+          0.637114939501179
+        ],
+        "rhs": 4,
+        "rhs_seed": 8713
+      },
+      {
+        "fam": "disk",
+        "n": 511,
+        "chi": 1000.0,
+        "p": [
+          0.7656288838589407,
+          0.3372415168799172,
+          0.637114939501179
+        ],
+        "rhs": 3,
+        "rhs_seed": 8713
+      },
+      {
+        "fam": "disk",
+        "n": 511,
+        "chi": 1000.0,
+        "p": [
+          0.7656288838589407,
+          0.3372415168799172,
+          0.637114939501179
+        ],
+        "rhs": 4,
+        "rhs_seed": 8713
+      },
+      {
+        "fam": "disk",
+        "n": 511,
+        "chi": 100000.0,
+        "p": [
+          0.7656288838589407,
+          0.3372415168799172,
+          0.637114939501179
+        ],
+        "rhs": 3,
+        "rhs_seed": 8713
+      },
+      {
+        "fam": "disk",
+        "n": 511,
+        "chi": 100000.0,
+        "p": [
+          0.7656288838589407,
+          0.3372415168799172,
+          0.637114939501179
+        ],
+        "rhs": 4,
+        "rhs_seed": 8713
+      },
+      {
+        "fam": "circ",
+        "n": 511,
+        "chi": 1000.0,
+        "p": [
+          0.7746764939189887,
+          0.2453605217013059,
+          0.2582022798345751
+        ],
+        "rhs": 3,
+        "rhs_seed": 8814
+      },
+      {
+        "fam": "circ",
+        "n": 511,
+        "chi": 1000.0,
+        "p": [
+          0.7746764939189887,
+          0.2453605217013059,
+          0.2582022798345751
+        ],
+        "rhs": 4,
+        "rhs_seed": 8814
+      },
+      {
+        "fam": "circ",
+        "n": 511,
+        "chi": 100000.0,
+        "p": [
+          0.7746764939189887,
+          0.2453605217013059,
+          0.2582022798345751
+        ],
+        "rhs": 3,
+        "rhs_seed": 8814
+      },
+      {
+        "fam": "circ",
+        "n": 511,
+        "chi": 100000.0,
+        "p": [
+          0.7746764939189887,
+          0.2453605217013059,
+          0.2582022798345751
+        ],
+        "rhs": 4,
+        "rhs_seed": 8814
+      },
+      {
+        "fam": "disk",
+        "n": 511,
+        "chi": 1000.0,
+        "p": [
+          0.7746764939189887,
+          0.2453605217013059,
+          0.2582022798345751
+        ],
+        "rhs": 3,
+        "rhs_seed": 8814
+      },
+      {
+        "fam": "disk",
+        "n": 511,
+        "chi": 1000.0,
+        "p": [
+          0.7746764939189887,
+          0.2453605217013059,
+          0.2582022798345751
+        ],
+        "rhs": 4,
+        "rhs_seed": 8814
+      },
+      {
+        "fam": "disk",
+        "n": 511,
+        "chi": 100000.0,
+        "p": [
+          0.7746764939189887,
+          0.2453605217013059,
+          0.2582022798345751
+        ],
+        "rhs": 3,
+        "rhs_seed": 8814
+      },
+      {
+        "fam": "disk",
+        "n": 511,
+        "chi": 100000.0,
+        "p": [
+          0.7746764939189887,
+          0.2453605217013059,
+          0.2582022798345751
+        ],
+        "rhs": 4,
+        "rhs_seed": 8814
+      },
+      {
+        "fam": "band",
+        "n": 511,
+        "chi": 100000.0,
+        "p": [
+          0.7746764939189887,
+          0.2453605217013059,
+          0.2582022798345751
+        ],
+        "rhs": 4,
+        "rhs_seed": 8927
+      },
+      {
+        "fam": "rot",
+        "n": 511,
+        "chi": 100000.0,
+        "p": [
+          0.7746764939189887,
+          0.2453605217013059,
+          0.2582022798345751
+        ],
+        "rhs": 4,
+        "rhs_seed": 8927
+      },
+      {
+        "fam": "poisson",
+        "n": 511,
+        "chi": 100000.0,
+        "p": [
+          0.7746764939189887,
+          0.2453605217013059,
+          0.2582022798345751
+        ],
+        "rhs": 4,
+        "rhs_seed": 8927
+      },
+      {
+        "fam": "jump",
+        "n": 511,
+        "chi": 100000.0,
+        "p": [
+          0.7746764939189887,
+          0.2453605217013059,
+          0.2582022798345751
+        ],
+        "rhs": 4,
+        "rhs_seed": 8927
+      },
+      {
+        "fam": "ellipse",
+        "n": 511,
+        "chi": 100000.0,
+        "p": [
+          0.7746764939189887,
+          0.2453605217013059,
+          0.2582022798345751
+        ],
+        "rhs": 4,
+        "rhs_seed": 8927
+      },
+      {
+        "fam": "two_vortices",
+        "n": 511,
+        "chi": 100000.0,
+        "p": [
+          0.7746764939189887,
+          0.2453605217013059,
+          0.2582022798345751
+        ],
+        "rhs": 4,
+        "rhs_seed": 8927
+      }
+    ],
+    "validate1023": [
+      {
+        "fam": "circ",
+        "n": 1023,
+        "chi": 1000.0,
+        "p": [
+          0.7656288838589407,
+          0.3372415168799172,
+          0.637114939501179
+        ],
+        "rhs": 4,
+        "rhs_seed": 8713
+      },
+      {
+        "fam": "circ",
+        "n": 1023,
+        "chi": 100000.0,
+        "p": [
+          0.7656288838589407,
+          0.3372415168799172,
+          0.637114939501179
+        ],
+        "rhs": 4,
+        "rhs_seed": 8713
+      },
+      {
+        "fam": "circ",
+        "n": 1023,
+        "chi": 100000.0,
+        "p": [
+          0.7656288838589407,
+          0.3372415168799172,
+          0.637114939501179
+        ],
+        "rhs": 3,
+        "rhs_seed": 8713
+      },
+      {
+        "fam": "disk",
+        "n": 1023,
+        "chi": 1000.0,
+        "p": [
+          0.7656288838589407,
+          0.3372415168799172,
+          0.637114939501179
+        ],
+        "rhs": 4,
+        "rhs_seed": 8713
+      },
+      {
+        "fam": "disk",
+        "n": 1023,
+        "chi": 100000.0,
+        "p": [
+          0.7656288838589407,
+          0.3372415168799172,
+          0.637114939501179
+        ],
+        "rhs": 4,
+        "rhs_seed": 8713
+      },
+      {
+        "fam": "disk",
+        "n": 1023,
+        "chi": 100000.0,
+        "p": [
+          0.7656288838589407,
+          0.3372415168799172,
+          0.637114939501179
+        ],
+        "rhs": 3,
+        "rhs_seed": 8713
+      }
+    ],
+    "validate2047": [
+      {
+        "fam": "circ",
+        "n": 2047,
+        "chi": 100000.0,
+        "p": [
+          0.7746764939189887,
+          0.2453605217013059,
+          0.2582022798345751
+        ],
+        "rhs": 4,
+        "rhs_seed": 8814
+      },
+      {
+        "fam": "disk",
+        "n": 2047,
+        "chi": 100000.0,
+        "p": [
+          0.7746764939189887,
+          0.2453605217013059,
+          0.2582022798345751
+        ],
+        "rhs": 4,
+        "rhs_seed": 8814
+      }
+    ]
+  },
+  "methods": {
+    "base": {
+      "method": "amg",
+      "cfg": "base"
+    },
+    "p8": {
+      "method": "amg",
+      "cfg": "p8"
+    },
+    "adaptive": {
+      "method": "adaptive",
+      "cfg": "p8",
+      "m": 2,
+      "pilot": 16,
+      "gate": "both",
+      "gate_steps": 40.0,
+      "gate_lambda": 0.04,
+      "rtol": 0.1,
+      "min_steps": 24,
+      "max_steps": 128,
+      "split": false,
+      "div": 4,
+      "bins": 0
+    },
+    "fixed96": {
+      "method": "fixed",
+      "fixed_steps": 96,
+      "cfg": "p8",
+      "m": 2,
+      "pilot": 16,
+      "gate": "both",
+      "gate_steps": 40.0,
+      "gate_lambda": 0.04,
+      "rtol": 0.1,
+      "min_steps": 24,
+      "max_steps": 128,
+      "split": false,
+      "div": 4,
+      "bins": 0
+    }
+  },
+  "repeats": {
+    "validate511": 2,
+    "validate1023": 2,
+    "validate2047": 2
+  },
+  "order_seed": 171116,
+  "control_extra_repetition": 2,
+  "definitions": {
+    "hard": "circ/disk, chi=1e5, all declared grids and RHS (14 cases)",
+    "controls": "circ/disk chi=1e3 plus band/rot/poisson/jump (14 cases)",
+    "topology": "ellipse and two_vortices (2 cases)",
+    "baseline": "faster median of base/p8 for each case",
+    "success": "all solves audited; hard median ratio <=0.75; every control median ratio <=1.10; both largest cases ratio <=0.75; report topology separately"
+  },
+  "caveats": [
+    "Gate is an empirical remaining-iteration proxy, NOT a calibrated setup-cost predictor.",
+    "Two coordinates selected from development; no geometry-family routing.",
+    "Adaptive/fixed96 share gates, fine Boomer, coordinate count and sparse basis; only Ritz stopping differs.",
+    "Support splitting rejected on development cost; it is not in either locked method.",
+    "All first-round problems are development; this file fixes fresh validation cases."
+  ],
+  "source_hashes": {
+    "solver.py": "44a8323c8013919a4227e0fb8ebae2372e302cfb4ca79ba81c7270c8b03915ea",
+    "bench.py": "b0b606741ae0ee8944c21bf4f1c9386cb3d709d802b32bee9fe2f20ae02db165",
+    "PROTOCOL.md": "b235cee101f1beeeec1597c602a2d2c60ee01ec9d8cb5d3d6dbd91446c8222c9",
+    "VALIDATION_CASES.json": "30738a5489b5fb3d9f0d50a23c4570aeaa3f70182cfd6c447e5bf5412ce3eb45",
+    "../boomer_rescue_20261116/experiment.py": "d46d9a17c718191cfd777220432bf03a29962302c6afc4a505b99422f07d4df9",
+    "../generalize/snn/cases_param.py": "9c7f5c4a339990a0de31a622f5d39a3502139343dcec0bf2081b1f7a4a25aebc",
+    "../anisotropic/ops_aniso.py": "01614ac4d5ca2dea4278a41a80870eb6b2660c380478a65b23ff01fd396dd8d9",
+    "../solver_challenge/ir_fp128.py": "2b42a3a29a02dd710a6e9f6d9c5736fb0cfd05e397955caf56720e51900acccb"
+  }
+}

@@ -1,0 +1,327 @@
+\documentclass[11pt,a4paper]{ctexart}
+\usepackage[margin=2.1cm]{geometry}
+\usepackage{amsmath,amssymb,booktabs,float,graphicx,xcolor,hyperref,enumitem}
+\hypersetup{colorlinks=true,linkcolor=blue!50!black,urlcolor=blue!50!black}
+\setlist{itemsep=2pt,topsep=3pt}
+\title{SSR 采样 Schur 约化：纯代数求解器的两轮 autoresearch}
+\author{温州肯恩大学 \quad Nonlinear Poisson 项目}
+\date{2026 年 11 月 7 日}
+
+\begin{document}
+\maketitle
+\sloppy
+
+\begin{abstract}
+目标是做一个泛化效果不低于 BoomerAMG 的线性求解器。SSR 只需要 CSR 矩阵和一套固定配置：每层对独立集精确消元，再用随机采样代替 Schur 补的填充。\textbf{结论是没有达到目标。}
+锁定版本对 BoomerAMG \texttt{fast.25} 的得分，开发集为 $-0.335$（平均约慢 1.26 倍，赢 6/23），留出集为 $-0.216$（约慢 1.16 倍，赢 4/14）；对每个算例的最优配置分别为 $-0.723$ 和 $-0.799$。
+SSR 在多群、无标度图、小世界图和 3D 对流上明显更快（0.22--0.73 倍），在 3D 扩散、3T、旋转各向异性上更慢，弹性问题对 nodal 配置达到 8 倍上限。
+第 2 轮用团块主元和二阶丢弃处理对称非 M 矩阵，迭代数明显下降（2D 旋转各向异性 146 降到 88，弹性 $\nu=0.45$ 从 1200 降到 400），但开发集得分 $-0.176$ 与默认的 $-0.144$ 同在噪声范围内，没有保留，留出集也没有再用。
+这一轮得到一个有用的代数结论：二阶丢弃等价于截断理想插值的 Galerkin 粗化。所以这条路最终趋向 AMG，却缺少 AMG 的快速粗化。
+\end{abstract}
+
+\section{目标和评测}
+\paragraph{算例。}开发集 23 个、留出集 14 个，覆盖 3D Poisson、各向异性、高对比度、四阶格式、非结构 P1、对流扩散、弹性、三类图 Laplacian、3T 和多群。留出集只对锁定的第 1 轮版本跑过一次。另外测了种子、网格增长、真实矩阵 SC26\_01 和不定 Helmholtz。
+
+\paragraph{判据。}原残差用双双精度计算，$\|b-Ax\|/\|b\|<10^{-8}$；内层 $\text{rtol}=10^{-6}$，$x_0=0$，右预条件，重启 50，单线程。时间含构建，不含双双精度校验。SSR 外层是 FGMRES，BoomerAMG 外层是 GMRES。
+
+\paragraph{指标。}$\text{SCORE}=-\text{mean}\log_2(t_\text{SSR}/t_\text{ref})$，比值截断在 $[1/8,8]$，失败算 8 倍。参照有两个：
+\begin{itemize}
+\item \texttt{fast.25}（HMIS、ext+i、$P_\text{max}=4$、一层聚集、$\theta=0.25$），开发集上最好的单一配置。
+\item 每个算例的最优配置，从 10 种配置中事后选出，弹性问题含需要块大小的 nodal 配置。这个参照对 SSR 偏严，它是事后选择的。
+\end{itemize}
+
+\paragraph{两套计时。}正式结果来自 \texttt{final.py}：每次运行一个进程，乱序，重复 3 次取最小值（弹性重复 1 次）。第 2 轮的筛选用 \texttt{eval\_ssr.py}，它读旧的 \texttt{amg\_baseline.json}，其中无标度图的时间还含双双精度校验，所以得分比 \texttt{final.py} 高约 0.1。第 2 轮只在同一脚本内部比较，$-0.144$ 不能和 $-0.335$ 直接比。
+
+\section{文献和启发}
+指定的三篇和相关论文，大多只读到摘要或检索片段。下表的“不足”只说明从摘要能看出的适用范围，以及本项目实测到的现象，不是对全文的评价。
+
+\begin{table}[H]
+\centering\footnotesize
+\begin{tabular}{p{3.6cm}p{5.0cm}p{6.6cm}}
+\toprule
+文献 & 读到的内容 & 与本工作的关系 \\
+\midrule
+BoomerAMG（Henson、Yang 2002） & 摘要 & 实测对配置敏感：\texttt{rot2d:512} 在 \texttt{fast.25} 下 92 次，\texttt{noagg.25} 下 17 次；弹性 400 次，nodal 47 次但要提供块大小；多群 109 次 \\
+Yue 等 2026（NMTMA） & 摘要：多群辐射扩散的右限制加性 Schwarz，内部用 AMG 子解 & 摘要只提到一个应用；方法面向特定问题，内层仍依赖 AMG \\
+An、Mo、Xu、Jia 2019（JCP） & \textbf{页面 403，只查到题目} & 方法细节未知，没有用于设计 \\
+Shu 等 2021（AAMM） & 摘要：$3\times3$ 块三角 AMG 预条件 & 面向 3T 块结构 \\
+Gao--Kyng--Spielman、RCHOL、ParAC & 摘要 & 随机消元，限于 Laplacian/SDD；SSR 的链式采样来自这一线。ParAC 也报告 AMG 在结构化 PDE 上通常占优 \\
+Cohen 等（有向 Laplacian） & 摘要 & 非对称稀疏 LU，主要是理论结果 \\
+ILUM、ARMS（Saad 等） & 摘要 & 独立集约化加确定性丢弃，与 SSR 最接近；第 2 轮的团块来自这里 \\
+Boman 等、Fehrenbach--Mirebeau & 摘要或检索片段 & 解释集总的代价：M 矩阵表示旋转张量可能需要更宽的模板（我的推断） \\
+Kyng--Zhang & 摘要 & 桁架类系统与一般线性系统同样难，提醒弹性不宜寄望于通用快速消元（我的引申） \\
+Tismenetsky--Kaporin、Klockiewicz--Darve & 检索片段 & 第 2 轮的二阶丢弃和近核保持 \\
+C$\ell$AIR、RAPNet & 检索片段 & 只作了解，没有用于设计 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{LGF 和 SNN。}这两条线的帮助有限，结果都是实测的：
+\begin{itemize}
+\item SNN 的“现场针对矩阵学习”对应松弛得到的近核向量。带噪声的向量让 3T 恶化，把它换成常向量后，\texttt{g3t} 从 302 次降到 42 次。
+\item LGF 的局部精确逆对应 F 点消元和团块主元。第 2 轮中团块 2 最好，团块 16 明显变差，所以更大的局部逆没有带来收益。
+\item 真正有用的是 FluxMG 的余量思路，改写成 GTH 型更新后，$10^{17}$ 量级的元素不会相消。
+\end{itemize}
+
+\section{SSR 方法}
+每层把未知量分成独立集 $F$ 和其余 $C$。$F$ 按低度优先贪心选取，主元要满足 $|a_{kk}|\ge 10^{-2}\sum_j|a_{kj}|$，弱于该行最大值 $0.25$ 倍的边不阻止入选，这些弱 F-F 边按行和归入对角。然后：
+\begin{enumerate}
+\item \textbf{集总。}与对角同号的非对角元按行和移到对角，等价于 $A+\sum a_{ij}L_{ij}$，$L_{ij}$ 是边 $(i,j)$ 的 Laplacian。
+\item \textbf{精确转移。}转移算子对集总后矩阵的 $F$ 块做精确消元，只有 Schur 补 $S=A_{CC}-A_{CF}A_{FF}^{-1}A_{FC}$ 被采样近似。
+\item \textbf{对称矩阵：链式采样（Kyng--Sachdeva）。}取 $v=A_{Ck}$，按 $|v_a|$ 升序。每个 $a$ 以 $|v_l|/W_{a+1}$ 的概率选 $l>a$，其中 $W_{a+1}=\sum_{c>a}|v_c|$，并加入权重 $-v_a\,\mathrm{sign}(v_l)\,W_{a+1}/a_{kk}$。期望恰为 $-v_av_l/a_{kk}$。
+\item \textbf{非对称矩阵：圆周运输采样。}入边 $u$、出边 $v$，$W_i=\sum|u_i|$，$W_o=\sum|v_j|$。在长为 $W_iW_o/|a_{kk}|$ 的圆周上排两组区间，行区间长 $|u_i|W_o/|a_{kk}|$，列区间长 $|v_j|W_i/|a_{kk}|$。随机平移后，重叠长度的期望恰为 $|u_iv_j/a_{kk}|$，且每次抽样的行和、列和都精确，填充至多 $n_\text{in}+n_\text{out}-1$ 个。
+\item \textbf{GTH 型对角。}保存行余量 $e$，初值用双双精度计算，更新 $e_i'=e_i-a_{ik}e_k/d_k$，对角由余量减去非对角和得到。这样不会发生大数相消。
+\end{enumerate}
+光滑用未集总的层矩阵，每 2 层做一次前后 Gauss--Seidel。$n\le300$ 时直接解。全部算例共用一套配置。
+
+\section{第 1 轮结果}
+\subsection{过程}
+\begin{table}[H]
+\centering\footnotesize
+\begin{tabular}{p{7.0cm}p{1.1cm}p{7.2cm}}
+\toprule
+改动 & 决定 & 证据 \\
+\midrule
+消元前集总同号元素 & 保留 & \texttt{rot2d} 发散变为 136 次 \\
+$\theta=0.25$，弱边不阻止 $F$ & 保留 & Poisson 53 层到 25 层，复杂度 7.90 到 5.5 \\
+GTH 型余量更新 & 保留 & \texttt{g3t} 422 到 302 次 \\
+常向量代替带噪声的松弛向量 & 保留 & \texttt{g3t} 302 到 42 次；3 胶囊失败变为 46 次；跳跃 185 到 95 次 \\
+非对称矩阵用圆周运输采样 & 保留 & \texttt{cd2d} $10^{-3}$ 不收敛变为 19 次；\texttt{g3t} 42 到 25 次；不再需要近核向量 \\
+反射、半圆对合的运输方案用于对称矩阵 & 丢弃 & 细管被断开，\texttt{tubes} 33 到 67 到 400 次 \\
+粗层丢弃 \texttt{DROP} & 丢弃 & \texttt{g3t} 25 到 73、112，再到失败 \\
+\texttt{NS=3} 增加采样 & 丢弃 & \texttt{fe3d} 复杂度 289，89\,s，没有收益 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{锁定结果}
+\begin{table}[H]
+\centering\footnotesize
+\begin{tabular}{lrrrrr}
+\toprule
+集合 & 对 \texttt{fast.25} 得分 & 获胜 & 对最优配置得分 & 获胜 & SSR 失败 \\
+\midrule
+开发集 & $-0.335$ & 6/23 & $-0.723$ & 3/23 & 1（刚度跳跃弹性）\\
+留出集 & $-0.216$ & 4/14 & $-0.799$ & 2/14 & 0 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{其他检查}
+\begin{itemize}
+\item \textbf{种子。}5 个种子下，Poisson 都是 15 次；\texttt{tubes} 28--33 次；\texttt{g3t} 18--25 次、3.66--4.44\,s，波动最大。
+\item \textbf{网格增长。}Poisson $32^3\to128^3$ 为 14 到 17 次（\texttt{fast.25} 为 17 到 19 次），时间比约 1.5--1.6。\texttt{cd2d} $256^2\to1024^2$ 为 16 到 21 次，时间比 0.82--1.06。
+\item \textbf{真实矩阵 SC26\_01：结果未知。}400\,s 超时；重跑到 18 分钟手动停止，当时在 FGMRES 中，CPU 占用 34\%，16\,GB 机器大量换页。迭代数不知道，所以不能据此判断方法本身失败。只能确定它在这台机器上没跑完，\texttt{fast.25} 为 34 次、23.8\,s、6.11\,GB。
+\item \textbf{不定 Helmholtz。}SSR 1200 次内不收敛，BoomerAMG 的已测配置也都失败。
+\end{itemize}
+
+\subsection{逐算例结果}
+下图是全部算例，下表只列代表性算例，完整数字在 \texttt{final\_dev.log} 和 \texttt{final\_holdout.log}。
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\textwidth]{ssr_ratios.pdf}
+\caption{SSR 与 BoomerAMG 的时间比，按对 \texttt{fast.25} 的比值排序。失败算 8 倍。开发集和留出集的模式相近，没有明显过拟合。}
+\end{figure}
+
+\begin{table}[H]
+\centering\footnotesize\setlength{\tabcolsep}{4pt}
+\begin{tabular}{llrrrrrrr}
+\toprule
+ & 算例 & SSR 次 & SSR (s) & \texttt{f.25} 次 & \texttt{f.25} (s) & 比值 & 最优配置（次，s） & 比值 \\
+\midrule
+开发 & \texttt{mg:32:8:1e2:1e-2:1:7} & 17 & 0.52 & 109 & 2.36 & \textbf{0.22} & \texttt{fast.7}（109，2.35） & \textbf{0.22} \\
+ & \texttt{graph:ba} & 9 & 1.34 & 10 & 3.90 & \textbf{0.34} & \texttt{fast.9}（10，3.71） & \textbf{0.36} \\
+ & \texttt{cd3d:64} & 12 & 0.86 & 21 & 1.56 & \textbf{0.55} & \texttt{fast.9}（39，0.93） & \textbf{0.92} \\
+ & \texttt{graph:ws} & 30 & 0.96 & 24 & 1.46 & \textbf{0.65} & \texttt{fast.9}（20，0.64） & 1.50 \\
+ & \texttt{cd2d} $10^{-3}$ & 19 & 0.65 & 34 & 0.69 & \textbf{0.94} & \texttt{noagg.25}（20，0.62） & 1.04 \\
+ & \texttt{fe3d} & 46 & 1.45 & 46 & 1.46 & \textbf{0.99} & \texttt{fast.9}（39，1.22） & 1.18 \\
+ & \texttt{poisson3d:64} & 15 & 0.78 & 17 & 0.53 & 1.47 & 同左 & 1.47 \\
+ & \texttt{rot2d:512} & 146 & 3.46 & 92 & 2.18 & 1.59 & \texttt{noagg.25}（17，0.88） & 3.92 \\
+ & \texttt{fe3d} 跳跃 $10^6$ & 95 & 2.52 & 46 & 1.42 & 1.78 & \texttt{fast.9}（41，1.26） & 1.99 \\
+ & \texttt{tubes} & 33 & 1.24 & 20 & 0.67 & 1.83 & 同左 & 1.83 \\
+ & 弹性 $\nu=0.3$ & 600 & 35.83 & 400 & 19.54 & 1.83 & \texttt{nodal.5}（47，3.04） & 8.00 \\
+ & \texttt{g3t} & 25 & 4.37 & 30 & 2.30 & 1.90 & 同左 & 1.90 \\
+ & 弹性跳跃 $10^4$ & 失败 & -- & 失败 & -- & 8.00 & \texttt{nodal.5}（1000，27.0） & 8.00 \\
+\midrule
+留出 & \texttt{mg:32:4} & 11 & 0.24 & 26 & 0.49 & \textbf{0.48} & 同左 & \textbf{0.48} \\
+ & \texttt{cd3d:80} & 13 & 1.71 & 21 & 3.19 & \textbf{0.54} & \texttt{fast.9}（41，1.83） & \textbf{0.93} \\
+ & \texttt{graph:ws} & 36 & 1.77 & 23 & 2.42 & \textbf{0.73} & \texttt{fast.9}（24，1.17） & 1.51 \\
+ & \texttt{cd2d:700} & 20 & 1.18 & 28 & 1.28 & \textbf{0.92} & \texttt{noagg.25}（19，1.08） & 1.09 \\
+ & \texttt{rot2d:700} & 226 & 9.87 & 135 & 6.03 & 1.64 & \texttt{noagg.25}（20，1.41） & 6.99 \\
+ & \texttt{fe3d:300000} & 165 & 8.58 & 71 & 4.55 & 1.89 & \texttt{fast.9}（55，3.45） & 2.48 \\
+ & 弹性 $\nu=0.4$ & 1000 & 115.51 & 1000 & 96.76 & 1.19 & \texttt{nodal.5}（55，6.95） & 8.00 \\
+ & \texttt{gen} 10 胶囊 & 33 & 5.05 & 30 & 2.48 & 2.04 & 同左 & 2.04 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section{限制效率的因素}
+\paragraph{集总让预条件子偏离原矩阵。}这是最主要的限制，有两组直接证据（都是缩小规模的算例）：
+\begin{itemize}
+\item 把集总后的算子精确求逆，这是任何层次结构都低不过的下限：\texttt{rot2d} 41 次，\texttt{stretch} 23 次，\texttt{rot3d} 32 次，\texttt{fe3d} 跳跃 48 次，弹性 266--308 次。
+\item 只解 M 部分与解原矩阵（单次到 $10^{-6}$）：\texttt{rot2d:512} 16 对 78 次，\texttt{stretch:30} 8 对 21 次，\texttt{fe3d} 跳跃 27 对 43 次；纯 M 矩阵 \texttt{aniso}、\texttt{tubes} 两者相同。所以层次结构本身没问题，差在 M 部分和原矩阵不一致。
+\end{itemize}
+\paragraph{层数多。}每层消去比例不高，粗层又变密：Poisson 25 层、复杂度 5.55，\texttt{g3t} 40 层、复杂度 7.01。这些算例迭代数已不比 BoomerAMG 多，但每次迭代约贵 1.5 倍（由计时拆分推算，只看量级）。
+\paragraph{构建偏慢。}普遍是 BoomerAMG 的 1.2--2 倍，弹性约 2.3 倍；BoomerAMG 的构建时间来自早先一轮运行，也只看量级。可能来自转置、三元组合并和 Python 层检查，这几项没有单独剖析。
+
+\section{替换集总的尝试}
+\begin{table}[H]
+\centering\footnotesize
+\begin{tabular}{p{5.2cm}p{7.0cm}p{2.8cm}}
+\toprule
+做法 & 结果 & 结论 \\
+\midrule
+保留符号填充，只采样异号部分，$\tau=0.01$--$0.2$ & $\tau=0.01$ 多数不收敛；$\tau=0.2$：\texttt{rot2d} 139，跳跃 800 & 丢弃 \\
+保留比例 $\beta$ 的同号元素 & 实际迭代 141--147，跳跃算例在 $\beta\ge0.6$ 时不收敛；精确求逆却有 \texttt{rot2d} 41 到 15、弹性 308 到 54 & 丢弃；采样噪声是合理解释，但没有直接测量 \\
+矩不变的非负边权（Carathéodory--Tchakaloff、NNLS） & 下限反而变差：\texttt{rot2d} 41 到 64--117，跳跃 48 到 400 以上 & 丢弃 \\
+Tismenetsky--Kaporin 二阶丢弃 & $\theta=0$：\texttt{elast:15} 169 到 58，\texttt{stretch:48} 46 到 19，但复杂度 104--189 & 有线索，进入第 2 轮 \\
+前 1--3 层精确消元 & \texttt{rot2d} 41 到 41--51，弹性 308 到 266 & 丢弃 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section{第 2 轮：团块主元和二阶丢弃}
+\subsection{设计}
+第 2 轮只改对称非 M 矩阵（判据：存在与对角同号的非对角元），其余算例继续走原路径。不改代码跑 3 次的得分是 $-0.186,-0.160,-0.127$，最小改进幅度取 $0.15$，期间换页计数没有增长。
+
+\paragraph{团块和更新。}贪心生长至多 $b$ 个未知量的团块，团块之间完全解耦，主元 $D=LL^T$ 精确分解。取 $V=A_{C,\text{团块}}$，$W=L^{-1}V^T$，精确更新是 $W^TW$。对 $W$ 每行保留最大的 $k$ 项，其余丢弃，只去掉“丢弃 $\times$ 丢弃”项。
+
+\paragraph{关键恒等式。}令 $W'$ 是任意截断或修改后的 $W$，$P_F=-L^{-T}W'$，$P=\begin{pmatrix}P_F\\ I\end{pmatrix}$，则
+\begin{equation}
+P^TAP=A_{CC}-W^TW'-W'^TW+W'^TW'.
+\end{equation}
+当 $W'$ 只保留 $W$ 的大项时，右边恰好是二阶丢弃的结果。所以\textbf{二阶丢弃就是截断理想插值的 Galerkin 粗化}，并且对任何 $W'$ 都有 $x^TS'x\ge x^TSx$，正定性不会丢失。随机稠密矩阵上数值核对，两边相对差 $10^{-16}$ 量级，$S'-S$ 最小特征值不低于 $-2\times10^{-15}$。
+
+\paragraph{保住常向量。}既然 $W'$ 可以任意修改，就让保留项做最小修正，使 $w'\cdot t=w\cdot t$，权重取 $|w|$，$t$ 为常向量。这对应 AMG 截断插值后的行和修正。
+
+\paragraph{弱边改道。}稀疏化粗矩阵 $S'$ 时，对 $|s_{ab}|<\tau\sqrt{s_{aa}s_{bb}}$ 的项：
+\begin{itemize}
+\item 正元素 $e$ 移到两个对角，差为 $eL_{ab}\succeq0$。
+\item 负元素（边权 $w=|s_{ab}|$）绕到共同邻居 $c$，差为 $w(2L_{ac}+2L_{bc}-L_{ab})\succeq0$，由三角不等式得到，与 $S'$ 的符号结构无关。系数取 1 时不再半正定（数值最小特征值 $-1$）。
+\end{itemize}
+两种操作都不改变常向量的作用。没有共同邻居的边保留。这个做法和非 Galerkin 粗化（Falgout--Schroder、Treister--Yavneh）属于同一类，是否有已发表的相同形式，我没有确认。
+
+\subsection{各步效果}
+下表是小规模算例。默认配置是 \texttt{elast:15} 169 次，\texttt{stretch:48} 46 次，\texttt{rot2d:200} 97 次。
+
+\begin{table}[H]
+\centering\footnotesize
+\begin{tabular}{lrrrrrrl}
+\toprule
+配置 & \multicolumn{2}{c}{\texttt{elast:15}} & \multicolumn{2}{c}{\texttt{stretch:48}} & \multicolumn{2}{c}{\texttt{rot2d:200}} & 结论 \\
+ & 次 & 复杂度 & 次 & 复杂度 & 次 & 复杂度 & \\
+\midrule
+团块 8，$k=4$，无过滤 & \multicolumn{2}{c}{超过 150} & \multicolumn{2}{c}{超过 150} & 66 & 43.6 & 复杂度过高 \\
+同上，保住常向量 & \multicolumn{2}{c}{超过 150} & \multicolumn{2}{c}{超过 150} & \textbf{24} & 44.2 & 迭代大幅下降 \\
+$k=4$，$\tau=0.01$，对角补偿，无常向量修正 & 126 & 4.05 & 73 & 2.47 & 167 & 2.85 & 层次退化 \\
+$k=2$，$\tau=0.01$，常向量修正加改道 & 107 & 5.64 & 45 & 4.55 & 69 & 3.50 & 复杂度解决 \\
+同上，团块 4 & 99 & 6.20 & 38 & 4.20 & 65 & 4.04 & \\
+同上，团块 16 & 116 & 5.74 & 53 & 6.77 & 81 & 3.97 & 团块越大越差 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+全尺寸算例上团块 2 也好于团块 4（\texttt{rot2d:512} 88 对 99 次，跳跃算例 102 对 226 次），所以开发集用团块 2。其他没有效果的尝试：
+\begin{itemize}
+\item \textbf{多个测试向量}（常向量加松弛向量，$k=6$）：迭代数没有减少，构建更慢。
+\item \textbf{弱边穿过团块以加快粗化}（$\theta=0.1$--$0.5$）：层数降到 4--19，但 \texttt{rot2d:512} 为 153--600 次，跳跃算例 379 次到不收敛。
+\item \textbf{更紧的过滤}（$\tau=0.003$）：\texttt{elast:41} 降到 94--236 次，但复杂度 18--25，56\,s（\texttt{nodal.5} 为 47 次、约 3\,s）；刚度跳跃仍不收敛。
+\end{itemize}
+
+\subsection{开发集结果}
+配置 \texttt{LUMP=4 DMODE=2 NTV=1 BLOCK=2 KEEP=2 FILT=0.01}，得分 $-0.176$，默认重跑 $-0.144$，都在噪声范围内。其余 14 个算例走原路径，迭代数不变。
+
+\begin{table}[H]
+\centering\footnotesize\setlength{\tabcolsep}{5pt}
+\begin{tabular}{lrrrrrrrrr}
+\toprule
+ & \multicolumn{3}{c}{默认} & \multicolumn{4}{c}{第 2 轮路径} & \multicolumn{2}{c}{\texttt{fast.25}（基线文件）} \\
+算例 & 次 & 复杂度 & s & 次 & 层 & 复杂度 & s & 次 & s \\
+\midrule
+\texttt{rot2d:512} & 146 & 2.40 & 3.47 & \textbf{88} & 26 & 5.56 & 3.59 & 92 & 2.19 \\
+\texttt{rot3d:48} & 59 & 3.44 & 0.92 & \textbf{37} & 31 & 8.16 & 1.27 & 48 & 0.59 \\
+\texttt{fe3d} & 46 & 3.04 & 1.41 & \textbf{29} & 31 & 5.58 & 1.82 & 46 & 1.59 \\
+\texttt{fe3d} 跳跃 $10^6$ & 95 & 2.96 & 2.47 & 102 & 26 & 4.87 & 3.92 & 46 & 1.54 \\
+\texttt{stretch:48} & 46 & 2.52 & 0.62 & \textbf{33} & 27 & 4.89 & 0.87 & 38 & 0.58 \\
+\texttt{fourth:512} & 28 & 2.37 & 0.80 & 28 & 26 & 4.46 & 1.38 & 18 & 0.66 \\
+弹性 $\nu=0.3$ & 600 & 3.75 & 35.7 & \textbf{353} & 37 & 7.84 & 38.9 & 400 & 19.8 \\
+弹性 $\nu=0.45$ & 1200 & 3.67 & 69.7 & \textbf{400} & 38 & 8.82 & \textbf{48.0} & 800 & 40.1 \\
+弹性跳跃 $10^4$ & 失败 & 3.58 & -- & 失败 & 32 & 6.61 & -- & 失败 & -- \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+迭代数下降被每次迭代的成本抵消：复杂度约为默认的 2 倍，时间只有 $\nu=0.45$ 明显改善。按保留规则没有保留，默认仍是 \texttt{LUMP=1}。留出集没有消耗，因为没有新版本需要验证。
+
+\subsection{为什么停止}
+恒等式说明这条路本质上在做 Galerkin 粗化，只是粗化方式是逐层独立集消元。它需要 26--38 层，每层的过滤误差和成本都累积；放开独立集的约束，又没有 AMG 那种处理 F-F 耦合的插值，直接失败。\texttt{rot2d:512} 上 \texttt{noagg.25} 只要 17 次、约 0.9\,s，第 2 轮路径要 88 次、3.59\,s。继续下去就要加入 F-F 插值和快速粗化，也就是重新实现 AMG。所以我判断上限来自结构，不是参数。第 2 轮从第 5 次实验起得分一直没有提高，文献给出的步骤也已试完，所以停止。
+
+\section{结论和建议}
+\paragraph{没有达到的目标。}SSR 不是“全面优于 BoomerAMG”的方案。一套固定配置下，它在开发集和留出集上都平均更慢，弹性问题没有解决，真实矩阵没有跑完。
+
+\paragraph{值得保留的部分。}
+\begin{itemize}
+\item \textbf{圆周运输采样。}让 2D 回流从不收敛变为 19 次，而且不需要近核向量；多群（0.22、0.48 倍）和 3D 对流（0.54--0.55 倍）是 SSR 最稳定的优势。检索没有找到相同做法，但范围有限，不能说是原创。
+\item \textbf{二阶丢弃与 Galerkin 的恒等式、改道稀疏化。}都有代数依据和数值核对，第 2 轮路径作为默认关闭的开关留在代码里。
+\end{itemize}
+
+\paragraph{建议的下一步（都未验证）。}
+\begin{enumerate}
+\item 不再继续用消元路线解决对称非 M 矩阵。
+\item 如果还想用 SSR，把范围收窄到非对称和不规则图这两类，并先在内存更大的机器上测真实矩阵，查清迭代数和内存。
+\item 如果仍要通用求解器，更实际的方向是在 AMG 的快速粗化上试改道稀疏化和矩修正，看能否降低层次成本。这要另开一轮，并与 Falgout--Schroder 的工作仔细对比。
+\end{enumerate}
+
+\section{局限和更正}
+\paragraph{局限。}
+\begin{itemize}
+\item 文献多数只读到摘要，An 等 2019 只查到题目。
+\item 只有单线程、单台 16\,GB 机器，有其他程序运行。计时噪声不小，相差 10\% 以内不要当作真实胜负。
+\item 第 2 轮候选只跑了一次开发集，没有重复确认；未达最小改进幅度，所以不影响结论。
+\item 留出集和开发集来自相近的生成器，真实矩阵只有 SC26\_01 一个时间步。
+\item 对最优配置的比较用了事后选择，BoomerAMG 的配置范围也只有 10 种。
+\end{itemize}
+
+\paragraph{过程中的更正。}
+\begin{itemize}
+\item 我曾说 SSR 在真实矩阵上“表现很差”。这句话下得太早，两次运行都受换页影响，迭代数未知。
+\item 我曾说“采样不是主要瓶颈”。这只在跳跃算例上有直接依据；\texttt{rot2d} 上增加到 3 倍采样，迭代数从 147 降到 115，采样可能也有贡献。
+\item 第 2 轮第一次完整评测把 $\theta=0$ 误用到所有算例（得分 $-0.741$、$-0.600$），已作废，表中是修正后的结果。
+\item 我在第 2 轮结束时说复杂度压到“3--8”，并说“同样过滤下”对角补偿到 73--388 次。准确说法见上表：开发集配置的复杂度是 4.46--8.82；同样 $\tau=0.01$ 下对角补偿为 73--167 次，73--388 次是 $\tau=0.01$ 到 $0.2$ 的范围。
+\item 我原来预期团块主元是关键，实测团块越大越差。起作用的是常向量修正和改道。
+\end{itemize}
+
+\section{复现}
+代码在 \texttt{FD\_LGF/gensolver/}，都没有提交。\\ 锁定版本在 \texttt{v1\_locked/}，逐项记录在 \texttt{autoresearch.jsonl}。
+
+\medskip\noindent\begin{minipage}{\textwidth}\footnotesize
+\begin{verbatim}
+export OMP_NUM_THREADS=1; PY=/opt/anaconda3/envs/hypre_env/bin/python
+$PY -u final.py dev 3                # default configuration, timed as in section 4
+$PY -u eval_ssr.py                   # screening eval
+$PY -u eval_ssr.py LUMP=4 DMODE=2 NTV=1 BLOCK=2 KEEP=2 FILT=0.01   # round 2 path
+\end{verbatim}
+\end{minipage}
+
+\section*{来源}
+\begin{footnotesize}
+\begin{itemize}[leftmargin=1.2em]
+\item BoomerAMG：\url{https://coloradoconference.github.io/2000/abs/yang.html}
+\item Yue 等 2026：\url{https://www.global-sci.com/nmtma/article/view/24724}
+\item An 等 2019：\url{https://doi.org/10.1016/j.jcp.2019.01.043}（只查到题目）
+\item Shu 等 2021：\url{https://www.global-sci.com/aamm/article/view/5131}
+\item Gao、Kyng、Spielman 2023：\url{https://arxiv.org/abs/2303.00709}
+\item RCHOL：\url{https://arxiv.org/abs/2011.07769}；ParAC：\url{https://arxiv.org/abs/2505.02977}
+\item Cohen 等：\url{https://arxiv.org/pdf/1811.10722}
+\item C$\ell$AIR：\url{https://arxiv.org/abs/2307.00229}；RAPNet：\url{https://arxiv.org/abs/2605.26854}
+\item ARMS：\url{https://www-users.cse.umn.edu/~saad/PDF/umsi-2002-105.pdf}
+\item Boman 等：\url{https://arxiv.org/abs/cs/0407022}；Fehrenbach--Mirebeau：\url{https://arxiv.org/pdf/1301.3925}
+\item Kyng--Zhang：\url{https://arxiv.org/pdf/1705.02944}
+\item Scott、Tůma（HSL\_MI28，二阶 IC）：\\ \url{https://epubs.stfc.ac.uk/manifestation/9133/RAL-P-2013-004.pdf}
+\item Carathéodory--Tchakaloff 子采样：\url{https://arxiv.org/pdf/1611.02065}
+\item Klockiewicz--Darve：\url{https://ar5iv.labs.arxiv.org/html/1907.03406}
+\end{itemize}
+\end{footnotesize}
+
+\end{document}

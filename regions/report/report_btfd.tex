@@ -1,0 +1,173 @@
+\documentclass[11pt,a4paper]{ctexart}
+\usepackage[margin=2.1cm]{geometry}
+\usepackage{amsmath,amssymb,booktabs,float,graphicx,xcolor,hyperref,enumitem}
+\hypersetup{colorlinks=true,linkcolor=blue!50!black,urlcolor=blue!50!black}
+\setlist{itemsep=2pt,topsep=3pt}
+\title{H52：不用 AMG 的 SC26\_01 求解器（bt-fd）——锁定实验}
+\author{温州肯恩大学 \quad Nonlinear Poisson 项目}
+\date{2026 年 11 月 5 日}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+目标：找一个不依赖 AMG、在时间上超过 BoomerAMG 的方法。做法是“按材料界面分区 + 快速求解器”：消去电子温度后，离子块和辐射块各自是“常系数背景 + 约 5\% 单元的特征区”，
+背景用快速对角化（与 DCT 同类）精确求逆，特征区用一次稀疏 Cholesky/LU 精确求解，两者用平衡形式组合（bt-fd）。整个求解器中没有 AMG。
+结果（单线程，锁定方案 0fece60e）：在\textbf{官方判据} $\|b-Ax\|/\|b\|$ 下（双双精度迭代修正），bt-fd 到 $10^{-4}$ 用 13.7\,s、到 $10^{-8}$ 用 17.4\,s，
+BoomerAMG 为 27.2\,s、36.6\,s，bt-v 为 22.6\,s、28.2\,s，即\textbf{约为 BoomerAMG 的一半时间}。按求解器自报残差到 $10^{-4}$：7.4\,s 对 18.4\,s（0.40 倍），外层迭代 6 步对 15 步。
+在 7 个自建三温离散（$m=128$，630 万未知量，不同几何与时间步）上，14 次求解中 12 次快于 BoomerAMG，典型 0.34--0.62 倍；到 $10^{-4}$ 的外层迭代为 BoomerAMG 的 0.38--0.58 倍。
+5 条预测 4 条成立。不成立的一条是真实矩阵按自报残差到 $10^{-8}$：53 步、28.5\,s（BoomerAMG 19.4\,s）。锁定后查明原因：锁定前把特征区的 MUMPS LU 换成了更快的 CHOLMOD Cholesky，
+后者在近奇异的热核上精度较差；换回 LU 后为 16 步、14.3\,s（探索性，需另行锁定验证）。
+另一个限制：壳层很厚、特征区接近 10\% 时，直接解的 setup 变贵，与 BoomerAMG 持平或略慢（1.04--1.13 倍）。
+\end{abstract}
+
+\section{思路与文献：借鉴什么，哪里做得更好}
+\begin{table}[H]
+\centering\small
+\begin{tabular}{p{4.0cm}p{5.3cm}p{6.1cm}}
+\toprule
+文献 & 做法 & 我们借鉴 / 改进 \\
+\midrule
+Aksoylu, Graham, Klie, Scheichl（2008）\cite{agks}；Aksoylu--Yeter（格心 FV）\cite{ay} &
+按系数把未知量代数地分成高导/低导两组；对比度足够高时子块逆可用常系数问题近似；高导孤岛上解趋于常数。子块仍用多重网格求解。 &
+借鉴“代数分区 + 常系数近似”。改进：子块不再用多重网格，而用\textbf{精确的快速对角化 + 小区域直接解}，setup 不需要粗化；区域由矩阵的强连接分量自动得到。 \\
+\addlinespace
+O'Leary--Widlund（1979）电容矩阵法 \cite{ow}；Börgers--Widlund 嵌入法 &
+用矩形区域上的快速 Poisson 求解器（FFT）解一般三维区域，边界修正由小的电容系统处理。 &
+借鉴“规则网格快速求解 + 边界修正”。我们的平衡形式相当于把电容系统换成特征区的直接解，自动包含了边界处理。 \\
+\addlinespace
+Vuik, Segal, Meijerink（1999）紧缩 &
+高对比度层状介质中，小特征值个数 = 高导层个数，用指示向量紧缩。 &
+热核近奇异孤岛（反应项/对角 $3\times10^{-15}$）被特征区的精确解完全吸收，不需要单独的紧缩向量。 \\
+\addlinespace
+Shu 等（AAMM 2021）\cite{shu}；Yue 等（CiCP 2021/2022）；Xu--Mo PCTL &
+三温问题的主流：按物理量分块（块三角/Schur/Schwarz），每块用 AMG。文献报告块 Schur 比整体 AMG 快约 5.5 倍（二维）。 &
+保留块三角结构（电子用对角消去，见 H41），把每块的 AMG 换成 FD-LGF。每次外层迭代的误差下降从约 0.7（V 循环）提高到约 0.1。 \\
+\addlinespace
+Liska--Colonius（2016）LGF 浸入边界 \cite{lc} &
+晶格 Green 函数处理无界区域与浸入物体。 &
+本项目 FD-LGF 的出发点；这里 Green 函数的作用由快速对角化承担（有限区域、Robin 边界）。 \\
+\addlinespace
+Ladecky 等（2025）Green--Jacobi FFT \cite{lad} &
+FFT 预条件 + Jacobi 缩放，适合光滑高对比度。 &
+对跳跃系数无效（项目早期已验证），所以本方法对跳跃部分用精确局部解。 \\
+\addlinespace
+Tian, Huang, Xu（2024）\cite{tian}；GPU 求解器文献 &
+同族 SC23 矩阵用 fp80 精度；GPU 上 AMG 的 setup 和数据依赖难以并行。 &
+我们用双双精度迭代修正满足官方判据；bt-fd 的主要运算是稠密矩阵乘/FFT 和稀疏三角解，比 AMG setup 更适合 GPU（尚未验证）。 \\
+\bottomrule
+\end{tabular}
+\caption{相关文献与本方法的关系。}
+\end{table}
+
+\section{可行性（只分析矩阵）}
+用通用代数规则分区：去掉强度 $|a_{ij}|/\sqrt{a_{ii}a_{jj}}<\delta$ 的连接，取连通分量；“泄漏”= 分量常数模态流出的比例。
+\begin{itemize}
+\item \textbf{离子 Schur 补 $S_3$}（$\delta=10^{-3}$）：外部 2,017,231 个单元，泄漏 $6\times10^{-8}$，99.4\% 的面系数在中位数 2 倍以内；热核 40,360 个 + 过渡层 7,264 个（热核泄漏 0.99，二者必须一起解）；壳层 32,054 个单元几乎是对角（非对角/对角 $\le5\times10^{-3}$）。
+\item \textbf{辐射块 $A_{11}$}：一个连通分量，98.2\% 的面系数在 $6.1\times10^9$ 的 2 倍以内，只有壳层（约 1.8\% 的面）偏离。
+\item 一次 $128^3$ DCT 及其逆 0.046\,s，比一次矩阵乘（0.084\,s）便宜。
+\end{itemize}
+
+\section{方法 bt-fd}
+\begin{enumerate}
+\item \textbf{块结构（同 bt-v）：}忽略辐射对电子的反馈 $A_{21}$（$\sim10^{-12}$）；用对角消去电子，离子 Schur 补 $S_3=A_{33}-A_{32}D_{22}^{-1}A_{23}$（无抵消对角）；先解 $S_3$，再回代电子，最后解 $A_{11}$。
+\item \textbf{每个标量块 $M$ 的一次 FD-LGF：}背景 $M_{bg}$ = 拟合的常系数算子（面系数中位数、反应项中位数、远端 Robin），用快速对角化精确求逆（$G$）；
+特征区 $F$ = 与背景相差超过行最大元 $10^{-6}$ 的单元，再外扩 2 层；$F$ 上精确直接解。
+\item \textbf{平衡形式，且不与特征行相乘：}$P=Q+(I-QM)G(I-MQ)$ 利用恒等式 $(r-MQr)_F=0$、$QMz=z_F+M_{FF}^{-1}M_{FC}z_C$ 改写为
+\[
+q_F=M_{FF}^{-1}r_F,\quad z=G\big(r_C-M_{CF}q_F\big),\quad Pr=\big[\,q_F-M_{FF}^{-1}M_{FC}z_C\ ;\ z_C\,\big].
+\]
+原写法要计算热核行（对角元 $1.8\times10^{17}$、几乎相互抵消）与向量的乘积，使计算出的 $P$ 有 $6\times10^{-8}$ 的非线性（$P(x+y)\ne P(x)+P(y)$），外层 GMRES 在 $10^{-8}$ 附近停滞（44--55 步）；改写后非线性 $2\times10^{-16}$，与 V 循环相同。
+\end{enumerate}
+\textbf{理想测试（每个标量块单独，PCG 到 $10^{-10}$）：}$S_3$ 11 步，$A_{11}$ 10 步；只用背景（不做特征区直接解）300 步不收敛。每次作用 0.2\,s，误差每步下降约 10 倍（一次 V 循环约 0.7 倍，H42）。
+
+\section{锁定方案与测试}
+方案 \texttt{protocol\_btfd.md}（sha256 0fece60e，2026-11-05T05:33:36Z）。锁定前的探索全部记录在方案中；锁定前最后一步把特征区直接解由 MUMPS LU 改为 CHOLMOD Cholesky（$S_3$ 上 1.35\,s 对 1.9\,s），只在 $m=64$ 自建算例上验证过。
+\begin{itemize}
+\item R：真实 SC26\_01，求解器自报残差（H40 判据），$10^{-4}$、$10^{-8}$，3 遍取中位数；
+\item IR：真实 SC26\_01，官方判据 $\|b-Ax\|/\|b\|$，双双精度迭代修正，内层 GMRES $10^{-6}$；
+\item G：自建三温离散 $m=128$ 的 7 个矩阵：基准几何（热核 43、壳层外径 54）、小靶丸 25/32、薄壳大核 60/66、厚壳 30/70、热容/时间步 $\times0.1$ 与 $\times10$、更强反馈与电子导热（$F=10^{-3},G=10^{-2}$）。
+\end{itemize}
+均为 GMRES(50)、右预条件、$x_0=0$、单线程、顺序运行（Mac M1 Pro）。
+
+\section{结果}
+\begin{figure}[H]
+\centering
+\includegraphics[width=\linewidth]{results.png}
+\caption{左：真实矩阵，求解器自报残差，3 遍中位数。中：真实矩阵，官方判据（迭代修正）。右：自建三温 $m=128$，bt-fd 相对 BoomerAMG 的总时间比（低于 1 表示更快）。}
+\end{figure}
+
+\begin{table}[H]
+\centering\footnotesize
+\begin{tabular}{lrrrr}
+\toprule
+真实 SC26\_01 & 自报 $10^{-4}$ & 自报 $10^{-8}$ & 官方 $10^{-4}$ & 官方 $10^{-8}$ \\
+\midrule
+BoomerAMG（amg-3d） & 15 步 / 18.4\,s & 23 / 19.4\,s & 28 步 / 27.2\,s & 37 / 36.6\,s \\
+bt-v（块三角 + AMG 块） & 15 / 12.3\,s & 23 / 15.7\,s & 28 / 22.6\,s & 38 / 28.2\,s \\
+\textbf{bt-fd（不用 AMG）} & \textbf{6 / 7.4\,s} & 53 / 28.5\,s & \textbf{11 / 13.7\,s} & \textbf{16 / 17.4\,s} \\
+\bottomrule
+\end{tabular}
+\caption{自报判据为 3 遍的中位数（第 1 遍机器负载较高，BoomerAMG 22.3/27.5\,s）。官方判据列的步数为各修正步内层迭代之和（各方法都是 3 个修正步），时间含 setup 和 Python 中的双双精度残差计算。bt-fd 的 setup 4.7--5.9\,s，BoomerAMG 5.8--9.6\,s。}
+\end{table}
+
+\begin{table}[H]
+\centering\footnotesize\setlength{\tabcolsep}{4pt}
+\begin{tabular}{lrrrrr}
+\toprule
+自建三温 $m=128$ & 特征区 & BoomerAMG $10^{-4}$ / $10^{-8}$ & bt-fd $10^{-4}$ / $10^{-8}$ & 时间比 & bt-fd setup \\
+\midrule
+基准 43/54 & 4.3\% & 13 / 21 步，12.3 / 15.9\,s & 6 / 9 步，6.6 / 7.6\,s & 0.54 / 0.48 & 4.2\,s \\
+小靶丸 25/32 & 0.9\% & 13 / 21，11.9 / 15.6 & 5 / 9，4.1 / 5.3 & 0.34 / 0.34 & 2.3\,s \\
+薄壳大核 60/66 & 7.7\% & 13 / 21，13.3 / 17.8 & 6 / 10，12.9 / 13.9 & 0.97 / 0.78 & 9.3\,s \\
+厚壳 30/70 & 9.2\% & 12 / 20，12.4 / 16.3 & 6 / 10，14.0 / 17.0 & \textbf{1.13 / 1.04} & 10.6\,s \\
+热容 $\times0.1$ & 4.3\% & 15 / 24，15.1 / 19.6 & 8 / 12，8.4 / 9.9 & 0.56 / 0.51 & 4.7\,s \\
+热容 $\times10$ & 4.3\% & 10 / 18，13.3 / 16.2 & 5 / 8，6.6 / 8.2 & 0.50 / 0.51 & 4.4\,s \\
+$F=10^{-3},G=10^{-2}$ & 4.3\% & 12 / 20，12.7 / 16.3 & 7 / 13，7.8 / 9.9 & 0.61 / 0.61 & 4.6\,s \\
+\bottomrule
+\end{tabular}
+\caption{特征区为外扩前的比例（两个标量块相同）。bt-v 在这些算例上为 BoomerAMG 的 0.77--1.10 倍。}
+\end{table}
+
+\section{预测检验}
+\begin{enumerate}
+\item R：bt-fd 中位数时间 $10^{-4}$ 不超过 0.75 倍、$10^{-8}$ 不超过 0.85 倍，且两档都快于 bt-v：\textbf{不成立}。$10^{-4}$ 为 0.40 倍并快于 bt-v；$10^{-8}$ 为 1.47 倍（53 步）。
+\item IR：bt-fd 达到官方 $10^{-8}$ 的时间少于 BoomerAMG 和 bt-v：\textbf{成立}（17.4\,s 对 36.6\,s、28.2\,s）。
+\item G：14 次全部收敛，至少 12 次快于 BoomerAMG：\textbf{成立}（14/14 收敛，12/14 更快；两次例外都是厚壳 30/70）。
+\item G：$10^{-4}$ 时迭代不超过 BoomerAMG 的 0.7 倍，至少 6/7：\textbf{成立}（7/7，0.38--0.58 倍）。
+\item 特征区（外扩前）在全部 8 个矩阵上不超过 12\%：\textbf{成立}（0.9\%--9.2\%）。
+\end{enumerate}
+
+\section{锁定后的诊断（探索性）}
+\begin{itemize}
+\item \textbf{第 1 条失败的原因：直接解的精度。}同一 bt-fd 只换特征区的分解：MUMPS LU 到 $10^{-4}/10^{-6}/10^{-8}$ 分别 6/8/16 步（14.3\,s）；CHOLMOD Cholesky 6/8/53 步。
+两者都是线性的（非线性 $2\times10^{-16}$），差别在于热核近奇异（反应项/对角 $3\times10^{-15}$）时 Cholesky 解的精度较低（求解结果相差约 $2\times10^{-5}$），影响收敛尾部。
+自建算例没有这个问题（8--13 步），所以锁定前在 $m=64$ 上的检查没有发现。教训：数值敏感的部件替换后，必须在真实矩阵的最严判据上重新验证。
+\item 这也说明为什么在\textbf{官方判据}下 bt-fd 不受影响：迭代修正的每一步内层只需 $10^{-6}$，正好是 bt-fd 最强的区间（8 步以内）。
+\end{itemize}
+
+\section{结论}
+\begin{enumerate}
+\item \textbf{存在不用 AMG 而比 BoomerAMG 快的方法。}在比赛实际使用的官方判据下，bt-fd 的时间约为 BoomerAMG 的一半（17.4\,s 对 36.6\,s），外层迭代 16 步对 37 步；在 7 个不同几何/时间步的自建三温矩阵中有 5 个快 1.6--3 倍。
+\item \textbf{为什么能赢：}矩阵的“难处”（$10^{19}$ 对比度、近奇异孤岛）全部集中在约 5\% 的单元上；其余 95\% 是常系数，可以精确快速求逆。AMG 要在整个网格上通过粗化去“发现”这一点，bt-fd 直接利用了它，所以每次迭代的误差下降约 10 倍（V 循环约 1.4 倍）。
+\item \textbf{适用范围与限制：}需要“常系数背景 + 局部特征”（特征区越小越好；接近 10\% 时 setup 抵消收益）；需要电子块近似对角（H43：电子导热不强）；目前单线程 Python。
+\end{enumerate}
+
+\paragraph{下一步（需要决定）。}
+(a) 用 MUMPS LU（或其他高精度分解）另做一轮锁定验证，修复自报判据 $10^{-8}$ 的尾部；
+(b) 降低特征区直接解的成本：热核本身也是常系数，可再嵌套一层快速求解，只对过渡层和壳层做直接解；
+(c) 写进现有的 C/MPI 版本（替换 bt-v 的两个 BoomerAMG 块），测多核和海光 DCU 上的时间——快速对角化与 FFT 在 GPU 上比 AMG 更有优势。
+
+\begin{thebibliography}{9}
+\bibitem{agks} B. Aksoylu, I. G. Graham, H. Klie, R. Scheichl, Towards a rigorously justified algebraic preconditioner for high-contrast diffusion problems, \emph{Comput. Vis. Sci.} 11 (2008) 319--331. \url{https://link.springer.com/doi/10.1007/s00791-008-0105-1}
+\bibitem{ay} B. Aksoylu, Z. Yeter, Robust multigrid preconditioners for cell-centered finite volume discretization of the high-contrast diffusion equation, arXiv:0904.1885. \url{https://arxiv.org/abs/0904.1885}
+\bibitem{ow} D. P. O'Leary, O. Widlund, Capacitance matrix methods for the Helmholtz equation on general three-dimensional regions, \emph{Math. Comp.} 33 (1979) 849--879. \url{https://www.ams.org/journals/mcom/1979-33-147/S0025-5718-1979-0528044-7}
+\bibitem{shu} S. Shu et al., Algebraic multigrid block triangular preconditioning for multidimensional three-temperature radiation diffusion equations, \emph{AAMM} (2021). \url{https://www.global-sci.com/aamm/article/view/5131}
+\bibitem{lc} S. Liska, T. Colonius, A fast immersed boundary method for external incompressible viscous flows using lattice Green's functions, \emph{J. Comput. Phys.} (2016), arXiv:1604.01814. \url{https://arxiv.org/abs/1604.01814}
+\bibitem{lad} M. Ladecký et al., Jacobi-accelerated FFT-based solver for smooth high-contrast data, arXiv:2508.02613 (2025). \url{https://arxiv.org/abs/2508.02613}
+\bibitem{tian} Tian, Huang, Xu, Mixed precision block-Jacobi preconditioner, arXiv:2407.15973 (2024). \url{https://arxiv.org/abs/2407.15973}
+\bibitem{vuik} C. Vuik, A. Segal, J. A. Meijerink, An efficient preconditioned CG method for the solution of a class of layered problems with extreme contrasts in the coefficients, \emph{J. Comput. Phys.} 152 (1999).
+\end{thebibliography}
+
+\paragraph{文件。}\sloppy 代码 \texttt{FD\_LGF/regions/}：\texttt{rsolve.py}（标量 FD-LGF）、\texttt{btfd.py}、\texttt{feasibility.py}、\texttt{oracle.py}、\texttt{run\_real.py}、\texttt{run\_ir.py}、\texttt{gen\_geo.py}、\texttt{explore\_factor.py}；结果 \texttt{results/test\_*}。
+\end{document}

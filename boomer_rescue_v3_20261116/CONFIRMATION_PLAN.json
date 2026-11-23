@@ -1,0 +1,552 @@
+{
+  "selected": {
+    "circ_511": "direct16",
+    "disk_511": "direct16",
+    "ellipse_511": "direct16",
+    "two_vortices_511": "direct32",
+    "circ_1023": "direct16",
+    "disk_1023": "direct16",
+    "two_vortices_1023": "direct32",
+    "circ_mid_1023": "direct16"
+  },
+  "jobs": [
+    {
+      "case": "disk_511",
+      "fam": "disk",
+      "n": 511,
+      "chi": 100000.0,
+      "p": [
+        0.21,
+        0.73,
+        0.35
+      ],
+      "rhs": 4,
+      "rhs_seed": 17119,
+      "variant": "weighted",
+      "tag": "weighted",
+      "rep": 0
+    },
+    {
+      "case": "disk_511",
+      "fam": "disk",
+      "n": 511,
+      "chi": 100000.0,
+      "p": [
+        0.21,
+        0.73,
+        0.35
+      ],
+      "rhs": 4,
+      "rhs_seed": 17119,
+      "variant": "direct",
+      "m": 16,
+      "tag": "direct16",
+      "rep": 0
+    },
+    {
+      "case": "ellipse_511",
+      "fam": "ellipse",
+      "n": 511,
+      "chi": 100000.0,
+      "p": [
+        0.21,
+        0.73,
+        0.35
+      ],
+      "rhs": 4,
+      "rhs_seed": 17119,
+      "variant": "weighted",
+      "tag": "weighted",
+      "rep": 1
+    },
+    {
+      "case": "ellipse_511",
+      "fam": "ellipse",
+      "n": 511,
+      "chi": 100000.0,
+      "p": [
+        0.21,
+        0.73,
+        0.35
+      ],
+      "rhs": 4,
+      "rhs_seed": 17119,
+      "variant": "direct",
+      "m": 16,
+      "tag": "direct16",
+      "rep": 1
+    },
+    {
+      "case": "circ_mid_1023",
+      "fam": "circ",
+      "n": 1023,
+      "chi": 10000.0,
+      "p": [
+        0.47,
+        0.19,
+        0.81
+      ],
+      "rhs": 4,
+      "rhs_seed": 17123,
+      "variant": "direct",
+      "m": 16,
+      "tag": "direct16",
+      "rep": 1
+    },
+    {
+      "case": "circ_mid_1023",
+      "fam": "circ",
+      "n": 1023,
+      "chi": 10000.0,
+      "p": [
+        0.47,
+        0.19,
+        0.81
+      ],
+      "rhs": 4,
+      "rhs_seed": 17123,
+      "variant": "weighted",
+      "tag": "weighted",
+      "rep": 1
+    },
+    {
+      "case": "disk_1023",
+      "fam": "disk",
+      "n": 1023,
+      "chi": 100000.0,
+      "p": [
+        0.47,
+        0.19,
+        0.81
+      ],
+      "rhs": 3,
+      "rhs_seed": 17123,
+      "variant": "weighted",
+      "tag": "weighted",
+      "rep": 1
+    },
+    {
+      "case": "disk_1023",
+      "fam": "disk",
+      "n": 1023,
+      "chi": 100000.0,
+      "p": [
+        0.47,
+        0.19,
+        0.81
+      ],
+      "rhs": 3,
+      "rhs_seed": 17123,
+      "variant": "direct",
+      "m": 16,
+      "tag": "direct16",
+      "rep": 1
+    },
+    {
+      "case": "circ_511",
+      "fam": "circ",
+      "n": 511,
+      "chi": 100000.0,
+      "p": [
+        0.21,
+        0.73,
+        0.35
+      ],
+      "rhs": 4,
+      "rhs_seed": 17119,
+      "variant": "direct",
+      "m": 16,
+      "tag": "direct16",
+      "rep": 0
+    },
+    {
+      "case": "circ_511",
+      "fam": "circ",
+      "n": 511,
+      "chi": 100000.0,
+      "p": [
+        0.21,
+        0.73,
+        0.35
+      ],
+      "rhs": 4,
+      "rhs_seed": 17119,
+      "variant": "weighted",
+      "tag": "weighted",
+      "rep": 0
+    },
+    {
+      "case": "ellipse_511",
+      "fam": "ellipse",
+      "n": 511,
+      "chi": 100000.0,
+      "p": [
+        0.21,
+        0.73,
+        0.35
+      ],
+      "rhs": 4,
+      "rhs_seed": 17119,
+      "variant": "weighted",
+      "tag": "weighted",
+      "rep": 0
+    },
+    {
+      "case": "ellipse_511",
+      "fam": "ellipse",
+      "n": 511,
+      "chi": 100000.0,
+      "p": [
+        0.21,
+        0.73,
+        0.35
+      ],
+      "rhs": 4,
+      "rhs_seed": 17119,
+      "variant": "direct",
+      "m": 16,
+      "tag": "direct16",
+      "rep": 0
+    },
+    {
+      "case": "circ_1023",
+      "fam": "circ",
+      "n": 1023,
+      "chi": 100000.0,
+      "p": [
+        0.47,
+        0.19,
+        0.81
+      ],
+      "rhs": 3,
+      "rhs_seed": 17123,
+      "variant": "direct",
+      "m": 16,
+      "tag": "direct16",
+      "rep": 1
+    },
+    {
+      "case": "circ_1023",
+      "fam": "circ",
+      "n": 1023,
+      "chi": 100000.0,
+      "p": [
+        0.47,
+        0.19,
+        0.81
+      ],
+      "rhs": 3,
+      "rhs_seed": 17123,
+      "variant": "weighted",
+      "tag": "weighted",
+      "rep": 1
+    },
+    {
+      "case": "circ_mid_1023",
+      "fam": "circ",
+      "n": 1023,
+      "chi": 10000.0,
+      "p": [
+        0.47,
+        0.19,
+        0.81
+      ],
+      "rhs": 4,
+      "rhs_seed": 17123,
+      "variant": "weighted",
+      "tag": "weighted",
+      "rep": 0
+    },
+    {
+      "case": "circ_mid_1023",
+      "fam": "circ",
+      "n": 1023,
+      "chi": 10000.0,
+      "p": [
+        0.47,
+        0.19,
+        0.81
+      ],
+      "rhs": 4,
+      "rhs_seed": 17123,
+      "variant": "direct",
+      "m": 16,
+      "tag": "direct16",
+      "rep": 0
+    },
+    {
+      "case": "circ_511",
+      "fam": "circ",
+      "n": 511,
+      "chi": 100000.0,
+      "p": [
+        0.21,
+        0.73,
+        0.35
+      ],
+      "rhs": 4,
+      "rhs_seed": 17119,
+      "variant": "direct",
+      "m": 16,
+      "tag": "direct16",
+      "rep": 1
+    },
+    {
+      "case": "circ_511",
+      "fam": "circ",
+      "n": 511,
+      "chi": 100000.0,
+      "p": [
+        0.21,
+        0.73,
+        0.35
+      ],
+      "rhs": 4,
+      "rhs_seed": 17119,
+      "variant": "weighted",
+      "tag": "weighted",
+      "rep": 1
+    },
+    {
+      "case": "circ_1023",
+      "fam": "circ",
+      "n": 1023,
+      "chi": 100000.0,
+      "p": [
+        0.47,
+        0.19,
+        0.81
+      ],
+      "rhs": 3,
+      "rhs_seed": 17123,
+      "variant": "direct",
+      "m": 16,
+      "tag": "direct16",
+      "rep": 0
+    },
+    {
+      "case": "circ_1023",
+      "fam": "circ",
+      "n": 1023,
+      "chi": 100000.0,
+      "p": [
+        0.47,
+        0.19,
+        0.81
+      ],
+      "rhs": 3,
+      "rhs_seed": 17123,
+      "variant": "weighted",
+      "tag": "weighted",
+      "rep": 0
+    },
+    {
+      "case": "two_vortices_1023",
+      "fam": "two_vortices",
+      "n": 1023,
+      "chi": 100000.0,
+      "p": [
+        0.47,
+        0.19,
+        0.81
+      ],
+      "rhs": 3,
+      "rhs_seed": 17123,
+      "variant": "direct",
+      "m": 32,
+      "tag": "direct32",
+      "rep": 0
+    },
+    {
+      "case": "two_vortices_1023",
+      "fam": "two_vortices",
+      "n": 1023,
+      "chi": 100000.0,
+      "p": [
+        0.47,
+        0.19,
+        0.81
+      ],
+      "rhs": 3,
+      "rhs_seed": 17123,
+      "variant": "weighted",
+      "tag": "weighted",
+      "rep": 0
+    },
+    {
+      "case": "two_vortices_1023",
+      "fam": "two_vortices",
+      "n": 1023,
+      "chi": 100000.0,
+      "p": [
+        0.47,
+        0.19,
+        0.81
+      ],
+      "rhs": 3,
+      "rhs_seed": 17123,
+      "variant": "direct",
+      "m": 32,
+      "tag": "direct32",
+      "rep": 1
+    },
+    {
+      "case": "two_vortices_1023",
+      "fam": "two_vortices",
+      "n": 1023,
+      "chi": 100000.0,
+      "p": [
+        0.47,
+        0.19,
+        0.81
+      ],
+      "rhs": 3,
+      "rhs_seed": 17123,
+      "variant": "weighted",
+      "tag": "weighted",
+      "rep": 1
+    },
+    {
+      "case": "disk_1023",
+      "fam": "disk",
+      "n": 1023,
+      "chi": 100000.0,
+      "p": [
+        0.47,
+        0.19,
+        0.81
+      ],
+      "rhs": 3,
+      "rhs_seed": 17123,
+      "variant": "direct",
+      "m": 16,
+      "tag": "direct16",
+      "rep": 0
+    },
+    {
+      "case": "disk_1023",
+      "fam": "disk",
+      "n": 1023,
+      "chi": 100000.0,
+      "p": [
+        0.47,
+        0.19,
+        0.81
+      ],
+      "rhs": 3,
+      "rhs_seed": 17123,
+      "variant": "weighted",
+      "tag": "weighted",
+      "rep": 0
+    },
+    {
+      "case": "disk_511",
+      "fam": "disk",
+      "n": 511,
+      "chi": 100000.0,
+      "p": [
+        0.21,
+        0.73,
+        0.35
+      ],
+      "rhs": 4,
+      "rhs_seed": 17119,
+      "variant": "weighted",
+      "tag": "weighted",
+      "rep": 1
+    },
+    {
+      "case": "disk_511",
+      "fam": "disk",
+      "n": 511,
+      "chi": 100000.0,
+      "p": [
+        0.21,
+        0.73,
+        0.35
+      ],
+      "rhs": 4,
+      "rhs_seed": 17119,
+      "variant": "direct",
+      "m": 16,
+      "tag": "direct16",
+      "rep": 1
+    },
+    {
+      "case": "two_vortices_511",
+      "fam": "two_vortices",
+      "n": 511,
+      "chi": 100000.0,
+      "p": [
+        0.21,
+        0.73,
+        0.35
+      ],
+      "rhs": 4,
+      "rhs_seed": 17119,
+      "variant": "weighted",
+      "tag": "weighted",
+      "rep": 0
+    },
+    {
+      "case": "two_vortices_511",
+      "fam": "two_vortices",
+      "n": 511,
+      "chi": 100000.0,
+      "p": [
+        0.21,
+        0.73,
+        0.35
+      ],
+      "rhs": 4,
+      "rhs_seed": 17119,
+      "variant": "direct",
+      "m": 32,
+      "tag": "direct32",
+      "rep": 0
+    },
+    {
+      "case": "two_vortices_511",
+      "fam": "two_vortices",
+      "n": 511,
+      "chi": 100000.0,
+      "p": [
+        0.21,
+        0.73,
+        0.35
+      ],
+      "rhs": 4,
+      "rhs_seed": 17119,
+      "variant": "direct",
+      "m": 32,
+      "tag": "direct32",
+      "rep": 1
+    },
+    {
+      "case": "two_vortices_511",
+      "fam": "two_vortices",
+      "n": 511,
+      "chi": 100000.0,
+      "p": [
+        0.21,
+        0.73,
+        0.35
+      ],
+      "rhs": 4,
+      "rhs_seed": 17119,
+      "variant": "weighted",
+      "tag": "weighted",
+      "rep": 1
+    }
+  ],
+  "source_hashes": {
+    "study.py": "c1cc6630243f560d593706630753bee6817a25da398ad3cd633a3d2df80ead46",
+    "run.py": "7c0e7e57864816678ff6b0bc4ccc51add4d0750456908c5dc14ae6b8845da480",
+    "PROTOCOL.md": "689408a597c71bf90621d2b6a036a4b520447a93669aa663ebc053ab77369fae",
+    "../boomer_rescue_v2_20261116/solver.py": "44a8323c8013919a4227e0fb8ebae2372e302cfb4ca79ba81c7270c8b03915ea",
+    "../boomer_rescue_20261116/experiment.py": "d46d9a17c718191cfd777220432bf03a29962302c6afc4a505b99422f07d4df9",
+    "../generalize/snn/cases_param.py": "9c7f5c4a339990a0de31a622f5d39a3502139343dcec0bf2081b1f7a4a25aebc",
+    "../anisotropic/ops_aniso.py": "01614ac4d5ca2dea4278a41a80870eb6b2660c380478a65b23ff01fd396dd8d9",
+    "../solver_challenge/ir_fp128.py": "2b42a3a29a02dd710a6e9f6d9c5736fb0cfd05e397955caf56720e51900acccb"
+  }
+}

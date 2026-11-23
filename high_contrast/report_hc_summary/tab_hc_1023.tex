@@ -1,0 +1,119 @@
+\begin{table}[H]\centering\small
+\caption{$n=1023$：PCG 迭代次数（4 个 $\chi$ 的范围）}\label{tab:its}
+\begin{tabular}{lcccc}
+\toprule
+系数 & BoomerAMG & GMG & FD-LGF $w{=}\frac1{16}$ & FD-LGF $w{=}\frac1{64}$ \\
+\midrule
+sep2 可分离 & 8--9 & 8 & 3--4 & 3--4 \\
+chan 通道 & 12--13 & 21--34 & 9--11 & 17--25 \\
+checker 棋盘 & 11 & 23--27 & 3--10 & 6--21 \\
+lognorm 对数正态 & 8--9 & 10--17 & 6--22 & 25--28 \\
+layered 类SPE10分层 & 9--12 & 14--33 & 16--22 & 23--24 \\
+diag 斜条纹 & 10--11 & 30--45 & 1 & 4--26 \\
+walls 绝缘墙 & 10--11 & 19--21 & 9 & 14 \\
+perc 随机两相 & 12--13 & 37--106 & 1 & 11--26 \\
+diagfine 细斜条纹 & 13 & 47--368 & 1 & 1 \\
+rough 粗糙随机场 & 9--11 & 11--54 & 1--18 & 16--23 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[H]\centering\small
+\caption{$n=1023$：误差降到 $10^{-8}$ 所需迭代数}\label{tab:k8}
+\begin{tabular}{lcccc}
+\toprule
+系数 & BoomerAMG & GMG & FD-LGF $w{=}\frac1{16}$ & FD-LGF $w{=}\frac1{64}$ \\
+\midrule
+sep2 可分离 & 5--6 & 4--6 & 3--4 & 3--4 \\
+chan 通道 & 9--10 & 15--30 & 9--11 & 14--25 \\
+checker 棋盘 & 8 & 15--23 & 8 & 17 \\
+lognorm 对数正态 & 5--7 & 6--16 & 5--13 & 16--22 \\
+layered 类SPE10分层 & 6--9 & 9--27 & 12--14 & 14--18 \\
+diag 斜条纹 & 8 & 24--43 & 1 & 18--20 \\
+walls 绝缘墙 & 7--8 & 13--16 & 7 & 11 \\
+perc 随机两相 & 9--10 & 27--99 & 1--2 & 20--26 \\
+diagfine 细斜条纹 & 9--10 & 34--282 & 1 & 1 \\
+rough 粗糙随机场 & 6--9 & 7--44 & 1--10 & 12--14 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[H]\centering\small
+\caption{$n=1023$：总时间 setup+solve（s，单线程）}\label{tab:time}
+\begin{tabular}{lcccc}
+\toprule
+系数 & BoomerAMG & GMG & FD-LGF $w{=}\frac1{16}$ & FD-LGF $w{=}\frac1{64}$ \\
+\midrule
+sep2 可分离 & 1.18--1.28 & 0.78--0.87 & 1.17--1.38 & 1.16--1.38 \\
+chan 通道 & 1.54--1.68 & 1.63--2.34 & 5.01--5.50 & 2.40--3.21 \\
+checker 棋盘 & 1.42--1.47 & 1.79--2.03 & 6.59--8.25 & 4.28--6.61 \\
+lognorm 对数正态 & 1.18--1.26 & 1.01--1.32 & 10.96--22.88 & 8.53--17.12 \\
+layered 类SPE10分层 & 1.26--1.50 & 1.24--2.18 & 8.63--20.35 & 6.55--14.08 \\
+diag 斜条纹 & 1.43--1.51 & 2.22--3.06 & 14.37--14.57 & 2.62--6.07 \\
+walls 绝缘墙 & 1.41--1.51 & 1.40--1.47 & 4.74--4.80 & 1.60--1.71 \\
+perc 随机两相 & 1.72--1.82 & 2.46--7.02 & 14.35--14.43 & 9.77--13.22 \\
+diagfine 细斜条纹 & 1.85--1.89 & 3.31--23.28 & 14.31--14.44 & 15.23--15.51 \\
+rough 粗糙随机场 & 1.23--1.50 & 1.04--3.74 & 14.99--24.53 & 8.83--28.66 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[H]\centering\small
+\caption{$n=1023$：setup 时间（s）}\label{tab:setup}
+\begin{tabular}{lcccc}
+\toprule
+系数 & BoomerAMG & GMG & FD-LGF $w{=}\frac1{16}$ & FD-LGF $w{=}\frac1{64}$ \\
+\midrule
+sep2 可分离 & 0.55 & 0.28--0.30 & 0.52--0.53 & 0.51--0.52 \\
+chan 通道 & 0.59--0.61 & 0.29--0.30 & 3.32--3.34 & 0.68--0.71 \\
+checker 棋盘 & 0.56--0.57 & 0.29--0.30 & 5.76--5.86 & 2.91--3.09 \\
+lognorm 对数正态 & 0.53--0.55 & 0.29--0.30 & 3.47--15.84 & 1.72--5.74 \\
+layered 类SPE10分层 & 0.54 & 0.28--0.29 & 2.60--13.12 & 0.99--4.81 \\
+diag 斜条纹 & 0.61--0.62 & 0.29--0.30 & 14.02--14.07 & 1.75--1.91 \\
+walls 绝缘墙 & 0.60--0.61 & 0.28--0.29 & 3.10--3.13 & 0.52--0.54 \\
+perc 随机两相 & 0.68--0.70 & 0.28--0.29 & 13.99--14.05 & 6.45--6.89 \\
+diagfine 细斜条纹 & 0.68--0.69 & 0.29--0.32 & 13.96--14.08 & 14.58--14.73 \\
+rough 粗糙随机场 & 0.54--0.57 & 0.29--0.30 & 14.49--16.14 & 1.91--19.39 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[H]\centering\small
+\caption{$n=1023$：FD-LGF 局部 LU 区域占网格的比例}\label{tab:loc}
+\begin{tabular}{lcc}
+\toprule
+系数 & FD-LGF $w{=}\frac1{16}$ & FD-LGF $w{=}\frac1{64}$ \\
+\midrule
+sep2 可分离 & 0.00 & 0.00 \\
+chan 通道 & 0.65 & 0.26 \\
+checker 棋盘 & 0.80 & 0.59 \\
+lognorm 对数正态 & 0.64--1.00 & 0.36--0.89 \\
+layered 类SPE10分层 & 0.46--0.97 & 0.20--0.81 \\
+diag 斜条纹 & 1.00 & 0.67 \\
+walls 绝缘墙 & 0.64 & 0.24 \\
+perc 随机两相 & 1.00 & 0.90 \\
+diagfine 细斜条纹 & 1.00 & 1.00 \\
+rough 粗糙随机场 & 1.00 & 0.65--1.00 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[H]\centering\small
+\caption{$n=1023$：按残差规则停止时的代数误差（各 $\chi$ 最大值）}\label{tab:err}
+\begin{tabular}{lcccc}
+\toprule
+系数 & BoomerAMG & GMG & FD-LGF $w{=}\frac1{16}$ & FD-LGF $w{=}\frac1{64}$ \\
+\midrule
+sep2 可分离 & $7.3{\times}10^{-13}$ & $8.2{\times}10^{-14}$ & $2.2{\times}10^{-9}$ & $2.2{\times}10^{-9}$ \\
+chan 通道 & $1.9{\times}10^{-11}$ & $2.2{\times}10^{-10}$ & $5.9{\times}10^{-7}$ & $1.7{\times}10^{-7}$ \\
+checker 棋盘 & $3.6{\times}10^{-13}$ & $3.1{\times}10^{-9}$ & $1.4{\times}10^{-4}$ & $6.1{\times}10^{-5}$ \\
+lognorm 对数正态 & $1.2{\times}10^{-12}$ & $8.8{\times}10^{-12}$ & $3.6{\times}10^{-11}$ & $2.0{\times}10^{-12}$ \\
+layered 类SPE10分层 & $2.6{\times}10^{-12}$ & $1.1{\times}10^{-11}$ & $4.9{\times}10^{-12}$ & $5.4{\times}10^{-12}$ \\
+diag 斜条纹 & $1.1{\times}10^{-11}$ & $1.4{\times}10^{-8}$ & $3.4{\times}10^{-12}$ & $6.7{\times}10^{-5}$ \\
+walls 绝缘墙 & $2.8{\times}10^{-12}$ & $4.6{\times}10^{-10}$ & $8.2{\times}10^{-14}$ & $6.8{\times}10^{-13}$ \\
+perc 随机两相 & $1.5{\times}10^{-11}$ & $1.6{\times}10^{-11}$ & $2.2{\times}10^{-7}$ & $6.4{\times}10^{-5}$ \\
+diagfine 细斜条纹 & $1.1{\times}10^{-11}$ & $3.1{\times}10^{-10}$ & $5.5{\times}10^{-12}$ & $5.5{\times}10^{-12}$ \\
+rough 粗糙随机场 & $1.9{\times}10^{-11}$ & $1.2{\times}10^{-10}$ & $4.9{\times}10^{-12}$ & $4.1{\times}10^{-11}$ \\
+\bottomrule
+\end{tabular}
+\end{table}

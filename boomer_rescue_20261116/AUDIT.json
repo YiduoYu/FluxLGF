@@ -1,0 +1,34 @@
+{
+  "status": "passed",
+  "locked_hashes": {
+    "experiment.py": "d46d9a17c718191cfd777220432bf03a29962302c6afc4a505b99422f07d4df9",
+    "batch.py": "53f7f59b28715abb1ee833b78999e3a2db843adb5700a0b827dda5f877671c45",
+    "PROTOCOL.md": "55320526ea3aaf4250002fd3bebe8f5a990d1784dacbd7040bb257b7dbc0cc02"
+  },
+  "dependency_hashes_at_audit": {
+    "generalize/snn/cases_param.py": "9c7f5c4a339990a0de31a622f5d39a3502139343dcec0bf2081b1f7a4a25aebc",
+    "anisotropic/ops_aniso.py": "01614ac4d5ca2dea4278a41a80870eb6b2660c380478a65b23ff01fd396dd8d9",
+    "solver_challenge/ir_fp128.py": "2b42a3a29a02dd710a6e9f6d9c5736fb0cfd05e397955caf56720e51900acccb"
+  },
+  "raw_counts": {
+    "baseline_screen.jsonl": 27,
+    "prototype_screen.jsonl": 30,
+    "scale_dev.jsonl": 28,
+    "ablate_dev.jsonl": 16,
+    "gate_dev.jsonl": 10,
+    "validate511.jsonl": 72,
+    "validate1023.jsonl": 24,
+    "validate2047.jsonl": 12,
+    "remeasure1023.jsonl": 5,
+    "controls_repeats.jsonl": 27,
+    "topology.jsonl": 12,
+    "diagnose_scale.jsonl": 4
+  },
+  "retained_validation_measurements": 147,
+  "unique_cases": 20,
+  "largest_repeat_iteration_difference": 0,
+  "max_double_double_residual": 7.971613319034415e-09,
+  "max_posthoc_residual": 7.360510247617664e-09,
+  "stderr_records": 0,
+  "note": "Dependencies were hashed at audit time; these were not locked before experiments. Post-hoc diagnostics are excluded from retained validation."
+}

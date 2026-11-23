@@ -1,0 +1,101 @@
+\documentclass[11pt,a4paper]{ctexart}
+\usepackage[margin=2.1cm]{geometry}
+\usepackage{amsmath,amssymb,booktabs,float,graphicx,xcolor,hyperref,enumitem}
+\hypersetup{colorlinks=true,linkcolor=blue!50!black,urlcolor=blue!50!black}
+\setlist{itemsep=2pt,topsep=3pt}
+\title{H57：相同精度下 bt-fd、BoomerAMG 与 bt-v、bt-j 的锁定对比}
+\author{温州肯恩大学 \quad Nonlinear Poisson 项目}
+\date{2026 年 11 月 6 日}
+
+\begin{document}
+\maketitle
+\sloppy
+
+\begin{abstract}
+之前的时间序列比较用自报残差，相同的阈值并不代表相同精度。本实验要求所有方法把双双精度原残差降到 $10^{-8}$ 以下。方案锁定后测试（sha256 82dbdb84）：真实 SC26\_01 跑 5 轮，6 个 $m=128$ 序列各 10 步，共 76 次运行，全部达标。
+\textbf{相同精度下，bt-fd 在小特征区上的优势成立}：G1、G4、G7 上 bt-fd 为基线 BoomerAMG 的 0.51--0.77 倍，Cholesky 版为 0.47--0.61 倍，真实矩阵上分别为 0.60 和 0.51 倍。
+\textbf{多夹杂时仍然输}：G8--G10 上 LU 版为 1.03--1.40 倍。Cholesky 版对基线为 0.86--1.21 倍，但对调参后的 BoomerAMG 仍是 1.03--1.35 倍。
+三条预设判定规则都没有触发，所以 FD-LGF 在小特征区上保留。但 bt-v 在多夹杂上最快，而它内部用了 AMG。目前没有一个不用 AMG 的方法能在所有算例上胜过调参后的 BoomerAMG。9 条预测中 7 条成立。
+\end{abstract}
+
+\section{方案}
+方案 \texttt{protocol\_h57.md}，sha256 82dbdb84，2026-11-05T17:07:12Z 锁定；源码包 \texttt{results/h57/locked\_sources.tar.gz}，运行后清单校验全部通过。
+
+判据：$\|b-Ax\|_2/\|b\|_2<10^{-8}$，$x$ 和残差用双双精度，每次修正用 GMRES(50)、右预条件、内层 $10^{-6}$，$x_0=0$。总时间 = 第 0 步 setup + 内层求解 + 残差计算。每次运行一个进程、单线程，顺序随机，不剔除任何数据。序列的预条件子只在第 0 步构造。
+
+方法：amg-base（$\theta=0.5$）、amg-tuned（$\theta=0.25$）、bt-v、bt-j、bt-fd（LU）、bt-fd-chol（序列和真实矩阵都用匹配容差 0.1；真实矩阵另加容差 $10^{-6}$ 的两组）。G11 按方案排除。
+
+\section{结果}
+\begin{table}[H]
+\centering\small
+\begin{tabular}{lrrrrrr}
+\toprule
+真实 SC26\_01（5 轮） & 总时间中位数 & 范围 & setup & 求解 & 内层迭代 & /基线（配对中位数）\\
+\midrule
+amg-base & 33.00 s & 32.3--35.9 & 6.33 & 21.12 & 37 & 1 \\
+amg-tuned & 31.86 & 30.5--32.6 & 6.65 & 19.19 & 34 & 0.925 \\
+bt-v & 29.80 & 27.6--32.7 & 6.15 & 17.69 & 38 & 0.853 \\
+bt-j & 35.21 & 33.9--40.0 & 6.81 & 22.53 & 38 & 1.067 \\
+bt-fd LU，容差 $10^{-6}$ & 19.58 & 18.9--22.5 & 6.39 & 8.25 & 16 & 0.602 \\
+bt-fd LU，容差 0.1 & 20.21 & 19.1--20.5 & 5.95 & 8.87 & 17 & -- \\
+bt-fd Cholesky，容差 $10^{-6}$ & \textbf{16.78} & 16.4--18.9 & 4.99 & 7.18 & 16 & \textbf{0.508} \\
+bt-fd Cholesky，容差 0.1 & 17.34 & 16.6--17.8 & 4.64 & 7.95 & 18 & -- \\
+\bottomrule
+\end{tabular}
+\caption{全部 3 步修正（残差计算约 5--6\,s）。公共准备约 0.65\,s。除 bt-j 有一次写出 0.86\,GB swap 外，其余 swap 写出为 0。}
+\end{table}
+
+\begin{table}[H]
+\centering\footnotesize\setlength{\tabcolsep}{4pt}
+\begin{tabular}{lrrrrrrrrr}
+\toprule
+序列 & 特征区 & amg-base & amg-tuned & bt-v & bt-j & bt-fd & chol & chol/tuned & bt-v/tuned \\
+\midrule
+G1 球 & 4.7\% & 246.9 & 220.2 & 208.7 & 264.9 & 126.4 & \textbf{117.2} & 0.53 & 0.95 \\
+G4 长椭球 & 9.1\% & 250.2 & 219.0 & 199.0 & 255.8 & 193.5 & \textbf{141.8} & 0.65 & 0.91 \\
+G7 3 胶囊 & 6.6\% & 258.6 & 215.0 & 225.7 & 275.3 & 165.0 & \textbf{156.8} & 0.73 & 1.05 \\
+G9 10 胶囊 & 16.3\% & 245.5 & 204.7 & \textbf{189.6} & 238.2 & 251.9 & 210.2 & 1.03 & 0.93 \\
+G8 10 胶囊 & 18.4\% & 234.0 & 209.7 & \textbf{194.0} & 230.1 & 326.8 & 283.5 & 1.35 & 0.93 \\
+G10 10 扁方块 & 20.3\% & 233.3 & 207.8 & \textbf{188.4} & 239.8 & 325.4 & 257.7 & 1.24 & 0.91 \\
+\bottomrule
+\end{tabular}
+\caption{10 步总时间（s）。一遍，每步最多 10 次修正，实际 2--3 次。}
+\end{table}
+
+\section{预测检验}
+\begin{enumerate}
+\item 全部收敛：\textbf{成立}（76/76）。
+\item bt-fd / amg-base $\le0.85$（G1、G4、G7）：\textbf{成立}（0.51、0.77、0.64）。
+\item bt-fd / amg-base $\ge1$（G8--G10 至少 2 个）：\textbf{成立}（1.40、1.03、1.40）。
+\item bt-v 在 6 个序列和真实矩阵上都快于 amg-base：\textbf{成立}（0.77--0.87，真实 0.85）。
+\item bt-v、bt-j 中较快者在 G8--G10 上都胜 bt-fd：\textbf{成立}（0.59、0.75、0.58）。
+\item Cholesky 快于 LU，内层迭代差 10\% 以内：\textbf{成立}（真实 0.87，序列 6/6，0.73--0.95）。方案没写明迭代比较的口径，这里取 10 步总数（差别不超过 3\%）；单看某一步，G4 第 0 步为 13 对 18，那是修正次数不同造成的。
+\item amg-tuned / amg-base 在 0.85--1.15：\textbf{不成立}（G7 为 0.83、G9 为 0.83）。调参的收益比预期大，方向对 BoomerAMG 有利。
+\item 第 9 步内层迭代不超过第 0 步加 3：\textbf{按字面不成立}（G1 的 amg-base 为 26 对 37，其余都成立）。原因是第 0 步只修正 2 次，第 9 步修正 3 次，每次修正内的迭代数不变（16、10、11），不是预条件子退化。
+\item bt-fd 容差 0.1 / $10^{-6}$ $\le1.10$（真实矩阵）：\textbf{成立}（1.02）。
+\end{enumerate}
+
+\section{判定规则}
+\begin{itemize}
+\item \textbf{R1（bt + AMG 成为默认）：未触发。}bt-v 胜 bt-fd 的序列有 3 个（G8--G10），但真实矩阵上是 bt-fd（容差 $10^{-6}$）的 1.44 倍，超过 1.3 倍上限。bt-j 同样有 3 个，但为 1.78 倍。
+\item \textbf{R2（小特征区优势不成立）：未触发。}G1、G4、G7 都是 bt-fd 更快。
+\item \textbf{R3（SC26\_01 上推翻 FD-LGF）：未触发。}bt-v、bt-j 分别是 Cholesky 版的 1.69、2.10 倍。
+\end{itemize}
+
+\section{讨论}
+\begin{itemize}
+\item \textbf{同精度复核的结论。}G1、G4、G7 的优势没有消失：0.51、0.77、0.64，H56 自报口径是 0.42、0.72、0.63。比值有所上升，但胜负不变。多夹杂的损失比自报口径小（G8 从 1.67 到 1.40，G10 从 1.50 到 1.40，G9 从 1.09 到 1.03）。
+\item \textbf{比较对象应改用调参后的 BoomerAMG。}$\theta=0.25$ 在 7 组矩阵上都更快（0.83--0.93）。想说“比 BoomerAMG 好”，就要和它比，不能和基线比。按这个标准，Cholesky 版在 G9 上已经不占优（1.03）。
+\item \textbf{比赛之外，Cholesky 也是更好的默认。}真实矩阵和 6 个序列全部快于 LU，因子非零元约为 LU 的 43\%（这两个统计口径不同，Cholesky 只算 $L$）。
+\item \textbf{bt-v 的结果说明消去电子确实有用}：它比 AMG 单独用更快，迭代数却差不多，省的是每步成本。但它内部用 BoomerAMG，不能算我们超过了 BoomerAMG。
+\item \textbf{目标还没达到。}不用 AMG 的方法里，Cholesky 版在 4 组（真实矩阵、G1、G4、G7）胜 amg-tuned，在 3 组（G8--G10）输。多夹杂的缺口正是下一步（通量型结构多重网格）要解决的问题。
+\end{itemize}
+
+\paragraph{局限。}只有串行；序列只跑一遍；时间序列是构造的扰动，不是真实演化；G11 被排除，所以最坏情形没有进入统计；修正步数是离散的（10 步合计 27--30 次），最终残差相差可达数个数量级，比值不是“相同最终残差”下的时间比；机器上开着其他程序，但 swap 写出很少（amg 最多 0.4\,GB，bt-fd LU 最多 1.1\,GB）。
+
+\paragraph{独立核验。}对保存的解（G8 的 Cholesky、bt-v，G1 的 amg-tuned）在随机 1000 行上做精确有理数计算，与双双精度残差之差约 $3\times10^{-22}\|b\|$，全局残差也与记录一致。
+
+\paragraph{对报告 25 的修正。}用户已明确不参加比赛，目标是做一个泛化的求解器，不用 AMG，或者明确优于 BoomerAMG。报告 25 第 3 节的比赛约束不再决定优先级，“默认 bt + 多重网格”的建议只在多重网格不是 AMG 时才符合目标；bt-v、bt-j 今后只作对照。
+
+\paragraph{文件。}\texttt{FD\_LGF/regions/}：\texttt{protocol\_h57.md}、\texttt{protocol\_h57.sha256}、\texttt{compare\_h57.py}；结果 \texttt{results/h57/}，表格副本 \texttt{audit\_20261105/rerun\_evidence/h57/}。
+\end{document}

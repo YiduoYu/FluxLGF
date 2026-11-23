@@ -1,0 +1,60 @@
+\documentclass[11pt,a4paper]{ctexart}
+\usepackage[margin=2.2cm]{geometry}
+\usepackage{amsmath,amssymb,booktabs,float,xcolor,hyperref,enumitem}
+\hypersetup{colorlinks=true,linkcolor=blue!50!black,urlcolor=blue!50!black}
+\setlist{itemsep=2pt,topsep=3pt}
+\title{H49（探索）：把粗网格慢模态放进 AMG 的插值}
+\author{温州肯恩大学 \quad Nonlinear Poisson 项目}
+\date{2026 年 11 月 4 日}
+\begin{document}\sloppy
+\maketitle
+\begin{abstract}
+报告 15 指出：外部紧缩在 $n=2047$ 上失效，因为慢模态个数随 $n$ 增长。本报告尝试把粗网格算出的慢模态作为 AMG 插值的近零空间向量，让 AMG 本身“看见”场线。
+这是\textbf{探索性}结果，只用了开发实例（种子 555，circ 族），没有锁定方案。
+结论：(1) BoomerAMG 的插值向量接口在标量问题上全部崩溃，无法使用；(2) 光滑聚合 AMG（PETSc GAMG）加 2--3 个慢模态，迭代大幅减少（$n=511$：463$\to$33 步，BoomerAMG 68 步），
+但迭代数仍随 $n$ 增长（33$\to$57$\to$99），而且设置成本高。总时间在 $n=2047$ 上最好为 BoomerAMG 的 0.79 倍，在 $n=511$ 上反而更慢。这不足以解决规模问题，不建议直接做锁定实验。
+\end{abstract}
+
+\section{BoomerAMG 插值向量：无法使用}
+PETSc 把矩阵的近零空间传给 hypre 的 \texttt{HYPRE\_BoomerAMGSetInterpVectors}（参数 \texttt{vec\_interp\_variant}）。在 $n=255$ 的 circ 上，变体 1/2/3 与默认、经典插值、nodal 粗化、Falgout 粗化的 15 种组合\textbf{全部段错误}。这个功能是为多分量方程组（nodal 系统）设计的，对标量问题不可用。
+
+\section{GAMG + 慢模态}
+GAMG 每个聚合块的局部插值精确再现给定的向量。近零空间取常数向量加 $k$ 个慢模态（同族 $n/4$ 粗网格上 40 步 Lanczos，插值到细网格，成本 0.1--2\,s）。PCG，$10^{-8}$，单线程。
+\begin{table}[H]
+\centering\footnotesize
+\begin{tabular}{lllrr}
+\toprule
+$n$ & 方法 & 设置 & 迭代 & 总时间 (s) \\
+\midrule
+511 & BoomerAMG & & 68 & 2.03 \\
+ & GAMG，仅常数向量 & 默认 & 463 & 5.4 \\
+ & GAMG + 2 个慢模态 & 阈值 0.01 / 0.02 / 0.05 & 55 / 44 / 33 & 2.26 / 2.76 / 5.55 \\
+ & GAMG + 3 个慢模态 & 阈值 0.01 / 0.02 / 0.05 & 47 / 37 / 26 & 3.17 / 4.73 / 11.6 \\
+ & 同上但不开 aggressive coarsening & & 275--567 & 14--111 \\
+\midrule
+1023 & BoomerAMG & & 112 & 12.4 \\
+ & GAMG + 2 个慢模态 & 阈值 0.01 / 0.02 & 71 / 57 & 11.5 / 14.7 \\
+ & GAMG + 2 个，aggressive 2 层 & 阈值 0.01 & 107 & 10.6 \\
+ & GAMG + 3 个，aggressive 2 层 & 阈值 0.02 & 66 & 14.7 \\
+ & GAMG，仅常数向量 / 不光滑插值 & & 834 / 1000+ & 41 / 54 \\
+\midrule
+2047 & BoomerAMG & & 162 & 76.8 \\
+ & GAMG + 2 个慢模态 & 阈值 0.01 / 0.02 & 111 / 99 & 73.1 / 102 \\
+ & GAMG + 2 个，aggressive 2 层 & 阈值 0.01 & 164 & 60.4 \\
+ & GAMG + 3 个，aggressive 2 层 & 阈值 0.02 & 84 & 79.8 \\
+\bottomrule
+\end{tabular}
+\caption{circ 族，开发种子 555 的一个实例（$n=511$ 两个实例结果相近，表中为第一个）。}
+\end{table}
+
+\section{分析}
+\begin{itemize}
+\item \textbf{慢模态对聚合 AMG 是必要信息。}只给常数向量时 GAMG 完全失效（463--834 步），加 2--3 个慢模态后降到 BoomerAMG 的一半左右。说明粗网格慢模态确实带有 AMG 缺少的“场线”信息，而且只要很少几个。
+\item \textbf{但迭代仍随 $n$ 增长}，增长速度和 BoomerAMG 差不多（GAMG+2 个：33、57、99；BoomerAMG：68、112、162）。几个全局光滑的慢模态只在局部提供了“常数 + 一阶变化”，不够表示更细尺度上沿场线不变、横向振荡的误差。
+\item \textbf{设置成本是另一瓶颈。}每多一个向量，粗网格的未知量就多一倍，GAMG 的 Galerkin 乘积和光滑插值成本迅速上升（$n=511$、3 个向量、阈值 0.05 要 10 秒）。只有在同一矩阵求解多个右端项时，设置成本才能摊薄：$n=511$ 时每次求解约 1.0 秒，BoomerAMG 为 1.76 秒。
+\end{itemize}
+
+\section{结论}
+“让 AMG 本身看见场线”的方向是对的，但用全局慢模态作为插值向量只部分做到：迭代减半，规模增长问题仍在，设置变贵。真正可扩展的做法需要\textbf{局部}的场线信息，例如按代数光滑向量（多次光滑后的随机向量，即 bootstrap/adaptive AMG）或按强连接方向定义聚合，而不是全局特征向量。这已经接近一个新的 AMG 设计问题，工作量明显更大。
+\paragraph{代码。}\texttt{FD\_LGF/generalize/snn/explore\_interp.py}、\texttt{explore\_gamg.py}，日志 \texttt{results/explore\_gamg\_scale.log}。
+\end{document}

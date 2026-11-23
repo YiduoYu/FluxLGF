@@ -1,0 +1,120 @@
+\documentclass[11pt,a4paper]{ctexart}
+\usepackage[margin=2.1cm]{geometry}
+\usepackage{amsmath,amssymb,booktabs,float,graphicx,xcolor,hyperref,enumitem}
+\hypersetup{colorlinks=true,linkcolor=blue!50!black,urlcolor=blue!50!black}
+\setlist{itemsep=2pt,topsep=3pt}
+\title{H55：多区域背景加孤岛粗空间（bt-fdd）锁定实验}
+\author{温州肯恩大学 \quad Nonlinear Poisson 项目}
+\date{2026 年 11 月 5 日}
+
+\begin{document}
+\maketitle
+\begin{center}\fcolorbox{red!55!black}{red!3}{\parbox{0.95\linewidth}{\small
+\textbf{更正说明（2026-11-05 加入，依据独立审计和报告 24）。}下面的正文和数字保持原样，未作修改；引用时以本说明和报告 24 为准。
+\begin{enumerate}[leftmargin=1.5em]
+\item 正文中自建矩阵的时间比（0.47--0.71 倍等）都按自报残差计算，不代表相同精度：真实矩阵上同为自报 $10^{-8}$ 时，bt-fdd 的缩放残差约 $2\times10^{-16}$，bt-fd 约 $9\times10^{-10}$。这些比值在相同精度下是否成立没有验证过。
+\item 官方判据下 bt-fd 18.3\,s、BoomerAMG 29.2\,s 是单遍结果。后来的隔离复测中两者分别为 20.1--25.5\,s 和 34.7--39.6\,s，不应跨批次比较绝对秒数。
+\item \texttt{FDMBox} 在一格厚方向上曾忽略边界，已修复。真实矩阵上 bt-fdd 的 4 个盒子都是 41--51 格厚，不受影响；本报告的自建矩阵没有逐一检查。
+\item “按特征区大小自动选择”没有经过独立验证，不是已确认的规则。
+\end{enumerate}
+}}\end{center}
+
+\begin{abstract}
+H53 的 bt-fd 只在特征区大（7.7\%、9.2\%）的两个矩阵上输给 BoomerAMG；H54 的多区域背景想降低这部分直接解成本，但卡在“孤岛”上。
+本报告给每个非最大区域加一个粗空间向量（区域指示向量），并把孤岛的快速求逆改成 Dirichlet 包围盒，得到 bt-fdd。方案锁定后测试（sha256 7ea73fd7），\textbf{7 条预测全部成立}。
+自建三温 $m=128$ 的 12 个矩阵、24 次求解\textbf{全部快于 BoomerAMG}（0.47--0.71 倍，中位数 0.59）；bt-fd 原来最差的厚壳 30/70 从 1.80/1.47 倍变为 0.63/0.59 倍，大热核 60/66 从 1.32/1.17 倍变为 0.69/0.71 倍。
+代价是在特征区小的矩阵上比 bt-fd 慢（25/32 慢约 1.4 倍），真实 SC26\_01 上官方判据 $10^{-8}$ 为 21.2\,s，介于 bt-fd（18.3\,s）和 BoomerAMG（29.2\,s）之间。
+bt-fdd 把 bt-fd 的最坏情形从 1.8 倍降到 0.71 倍，代价是平均略慢；两者可以按特征区大小自动选择。
+\end{abstract}
+
+\section{方法}
+\sloppy 在 H54 的多区域背景（每个均匀区域一个快速对角化逆，直接解只留给界面）上做两处改动：
+\begin{enumerate}
+\item \textbf{孤岛粗空间。}除最大区域外，每个区域的指示向量 $v_k$ 加入平衡形式的精确部分：
+$W=[I_F,\ v_1,\dots,v_K]$，$Q=W(W^TMW)^{-1}W^T$，$P=Q+(I-QM)G(I-MQ)$。
+\[W^TMW=\begin{pmatrix}M_{FF}&(Mv)_F\\ (M^Tv)_F^T& v^TMv\end{pmatrix}\]
+只在孤岛旁边多出非零元，仍是稀疏矩阵，用一次 MUMPS LU 分解。
+$Mv$、$M^Tv$、$v^TMv$ 在 setup 时用双双精度（two\_prod + two\_sum）精确求和，因为热核行是 $10^{17}$ 量级元素相互抵消到 $10^2$ 的反应项。
+不需要判断哪个区域是孤岛：每个非最大区域都加，非孤岛区域多一个未知量也无害。
+\item \textbf{孤岛用 Dirichlet 包围盒快速求逆。}H54 中每个区域在整立方体（Neumann 边界）上做快速对角化。热核 $r/\kappa\approx10^{-14}$，常数模态几乎奇异，$z=Gr$ 在 $v$ 方向上大约 $10^{10}$ 倍，
+再由 $(I-QM)$ 减掉，相减丢掉约 10 位有效数字（$S_3$ 线性缺陷 $7.6\times10^{-4}$）。改为在区域的包围盒上求逆、盒子内部的面取 Dirichlet 后，$G$ 会低估这个模态，粗空间再把它补上，线性缺陷降到 $10^{-16}$。
+\end{enumerate}
+最大区域仍用整立方体快速对角化；其余同 bt-fd（电子消去、块三角、每块一次）。
+
+\paragraph{诊断过程（探索，$m=64$）。}先后试过：Schur 补形式的粗求解（缺陷 $10^{-11}$）、带边 LU（仍 $10^{-11}$--$10^{-9}$）、单边形式 $P=Q+(I-QM)G$（$4\times10^{-8}$），都没有解决；
+逐块测量后发现 $G_k$ 和 LU 各自都线性到 $10^{-15}$，问题出在组合时的相减，原因是第 2 点。每个区域再加 $x,y,z$ 三个线性向量只少 1 步（12 → 11），setup 却变成 3 倍，没有采用；平衡形式比单边形式少约 1 步。
+真实矩阵上按自报残差到 $10^{-8}$ 需要 60 步，残差历史显示这是双精度平台：bt-fd 的自报残差也停在 $1$--$2\times10^{-8}$（只是略低于 $10^{-8}$），而官方判据（双双精度迭代修正）下 bt-fdd 正常收敛。
+
+\section{锁定方案与结果}
+\sloppy 方案 \texttt{protocol\_h55.md}，sha256 7ea73fd7，2026-11-05T09:22:38Z 锁定。探索阶段看过真实矩阵和 3 个自建矩阵（30/70、60/66、43/54），其余 9 个自建矩阵从未用 bt-fdd 运行过。
+设置同 H53：GMRES(50)、右预条件、$x_0=0$、单线程、顺序运行；真实矩阵自报判据 3 遍取中位数。
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\linewidth]{results55.png}
+\caption{左：12 个自建三温矩阵上 bt-fd 和 bt-fdd 相对 BoomerAMG 的时间比（低于 1 表示更快）。右：真实 SC26\_01，自报判据为 3 遍中位数，官方判据为双双精度迭代修正（内层 $10^{-6}$）。}
+\end{figure}
+
+\begin{table}[H]
+\centering\footnotesize\setlength{\tabcolsep}{4pt}
+\begin{tabular}{lrrrrr}
+\toprule
+自建三温 $m=128$ & BoomerAMG & bt-fd（H53） & bt-fdd & bt-fdd/AMG & bt-fdd/bt-fd \\
+\midrule
+小靶丸 25/32 & 11.8/15.8\,s & 4.1/5.3 & 5.9/7.4 & 0.50/0.47 & 1.46/1.41 \\
+35/45 & 11.2/15.8 & 5.6/6.5 & 6.4/8.4 & 0.57/0.53 & 1.14/1.29 \\
+基准 43/54 & 11.9/15.7 & 7.7/8.8 & 7.1/8.9 & 0.60/0.57 & 0.92/1.02 \\
+热容 $\times0.1$ / $\times0.3$ & 13.3/17.4，11.8/16.2 & 8.1/10.2，7.7/9.2 & 7.4/9.8，7.1/9.2 & 0.56--0.60 & 0.91--1.01 \\
+热容 $\times3$ / $\times10$ & 10.9/15.1，10.4/14.5 & 7.3/8.8，7.4/8.7 & 6.7/8.9，6.0/8.6 & 0.58--0.61 & 0.82--1.01 \\
+$F,G$ 两种耦合 & 11.8/15.4，11.8/15.6 & 8.1/10.5，7.8/9.2 & 7.5/9.7，7.3/9.3 & 0.59--0.63 & 0.92--1.01 \\
+50/58 & 11.4/16.1 & 9.8/11.0 & 7.3/9.6 & 0.64/0.60 & 0.74/0.87 \\
+大热核 60/66 & 12.0/15.8 & 15.9/18.5 & \textbf{8.3/11.1} & 0.69/0.71 & 0.52/0.60 \\
+厚壳 30/70 & 11.6/15.6 & 20.9/22.9 & \textbf{7.3/9.2} & 0.63/0.59 & 0.35/0.40 \\
+\bottomrule
+\end{tabular}
+\caption{总时间（$10^{-4}$/$10^{-8}$）。bt-fdd 的特征区（含外扩）为 0.7--3.4\%（bt-fd 外扩前为 0.9--9.2\%），setup 2.9--3.8\,s（bt-fd 2.3--16.5\,s）；外层迭代 bt-fdd 7--18 步，约为 bt-fd 的 1.6 倍、BoomerAMG 的 0.6--0.9 倍。}
+\end{table}
+
+\begin{table}[H]
+\centering\footnotesize
+\begin{tabular}{lrrrr}
+\toprule
+真实 SC26\_01 & 自报 $10^{-4}$ & 自报 $10^{-8}$ & 官方 $10^{-4}$ & 官方 $10^{-8}$ \\
+\midrule
+BoomerAMG & 15 步 / 13.1\,s & 23 / 17.3\,s & 28 / 23.2\,s & 37 / 29.2\,s \\
+bt-fd（H53） & 6 / 8.4\,s & 16 / 12.4\,s & 11 / 14.8\,s & 16 / 18.3\,s \\
+bt-fdd & \textbf{8 / 7.7\,s} & 60 / 31.5\,s（平台） & 20 / 15.8\,s & 30 / 21.2\,s \\
+\bottomrule
+\end{tabular}
+\caption{自报判据 3 遍之间差别 $\le1$\,s。bt-fdd setup 4.2--4.8\,s，bt-fd 5.7--6.9\,s。}
+\end{table}
+
+\section{预测检验}
+\begin{enumerate}
+\item 自建 24 次全部收敛，且至少 22 次快于 BoomerAMG：\textbf{成立}（24/24 收敛，24/24 更快，0.47--0.71 倍）。
+\item 60/66 和 30/70 上 bt-fdd 两档都快于 BoomerAMG 和 bt-fd，且不超过 bt-fd 的 0.75 倍：\textbf{成立}（8/8；0.35、0.40、0.52、0.60）。
+\item 至少 14/24 次快于 bt-fd：\textbf{成立}（16/24；输在 25/32、35/45 和几个基准变体的 $10^{-8}$，后者只慢 1--2\%）。
+\item 真实矩阵自报 $10^{-4}$ 中位数不超过 BoomerAMG 的 0.65 倍：\textbf{成立}（0.59）。
+\item 真实矩阵官方 $10^{-8}$ 不超过 BoomerAMG 的 0.85 倍：\textbf{成立}（0.73）。
+\item 13 个矩阵线性缺陷 $\le10^{-14}$：\textbf{成立}（全部 $\le1.0\times10^{-16}$）。
+\item （预期为负）真实矩阵自报 $10^{-8}$ 超过 40 步：\textbf{成立}（60 步）。
+\end{enumerate}
+
+\section{讨论}
+\begin{itemize}
+\item \textbf{bt-fdd 解决的是稳健性。}bt-fd 的时间取决于特征区大小（0.34--1.80 倍 BoomerAMG），bt-fdd 把直接解压到界面层（0.7--3.4\%），setup 稳定在 3--4\,s，所有矩阵都在 0.47--0.71 倍之间。
+\item \textbf{代价是每步更弱。}热核内部不再精确求解，只有常数模态精确，外层迭代约多 60\%；特征区本来就小时（25/32、35/45、真实矩阵）bt-fd 更快。
+可以在 setup 时按 bt-fd 的特征区比例自动选择（例如超过约 5\% 用 bt-fdd），这条规则\textbf{尚未锁定验证}。
+\item \textbf{孤岛不需要识别。}H54 卡在“哪个区域是孤岛”（真实辐射热核是渐变过渡，被漏判）；给所有非最大区域都加粗向量后这个问题消失。
+\item \textbf{数值上的教训：}快速求逆的边界条件必须让每个模态都“不奇异”，否则粗空间修正会变成大数相减。这与 H52 的教训（不要在预条件里形成与近抵消行的乘积）是同一类问题。
+\item \textbf{真实矩阵自报 $10^{-8}$ 是双精度平台，}bt-fd 恰好落在平台下方，bt-fdd 落在上方；比赛用官方判据（迭代修正）时没有这个问题。
+\item \textbf{泛化的局限：}仍需要结构化网格和分片常数系数，区域数多时每步成本随区域数增长；测试集都是同心球几何，多个夹杂、非球形、渐变系数尚未测试。
+\end{itemize}
+
+\section{下一步}
+(a) 泛化测试：新的生成器（多个随机夹杂、非球形区域、渐变过渡层、时间推进序列），锁定后比较 bt-fd、bt-fdd、BoomerAMG，并验证按特征区比例自动选择的规则；
+(b) C/MPI 实现与海光 DCU 测试；(c) 比赛提交仍按 H53 的结论（Cholesky + 迭代修正），bt-fdd 作为大特征区情形的备选。
+
+\paragraph{文件。}\sloppy \texttt{FD\_LGF/regions/rsolve.py}（\texttt{DeflatedFDLGF}、\texttt{dd\_matvec}、\texttt{FDMBox(dirichlet=True)}）、
+\texttt{protocol\_h55.md}、\texttt{test\_h55.sh}、\texttt{lin55.py}、\texttt{explore\_defl.py}、\texttt{diag\_hist.py}、\texttt{diag\_real\_defl.py}；结果 \texttt{results/h55\_*}、\texttt{results/explore\_defl*}；图 \texttt{report/make\_fig55.py}。
+\end{document}

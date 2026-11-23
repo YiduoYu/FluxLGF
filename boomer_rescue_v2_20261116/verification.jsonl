@@ -1,0 +1,3 @@
+{"split": false, "symmetry": 8.949617061844041e-15, "min_eigenvalue": 9.735645645015027e-07}
+{"split": true, "symmetry": 3.4162260082553065e-15, "min_eigenvalue": 9.74166519636539e-07}
+{"check": "CG_continuation_and_Ritz_residual", "passed": true, "ritz": {"ritz_steps": 8, "ritz_trace": [{"steps": 8, "mu": [0.3778471320001068, 0.569848611342448], "relative_ritz_residual": [0.00036093212664653436, 0.00403622069889391]}], "mu": [0.3778471320001068, 0.569848611342448], "ritz_residual": [0.0003609321266451449, 0.004036220698894553], "quality_met": true}}

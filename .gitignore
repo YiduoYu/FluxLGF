@@ -1,0 +1,21 @@
+# competition data and large binaries (kept locally, not in git)
+SolverChallenge26-tenproblems/
+generalize/snn/data/
+solver_challenge/c_impl/answer_x.rhs
+.pytest_cache/
+# LaTeX build files
+*.xdv
+*.aux
+*.log
+*.out
+*.toc
+*.synctex.gz
+
+# Repository-local artifacts
+.DS_Store
+__pycache__/
+*.py[cod]
+*.dylib
+*.so
+*.pt
+.env

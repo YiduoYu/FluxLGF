@@ -1,0 +1,101 @@
+\documentclass[11pt,a4paper]{ctexart}
+\usepackage[margin=2.2cm]{geometry}
+\usepackage{amsmath,amssymb,booktabs,float,xcolor,hyperref,enumitem}
+\hypersetup{colorlinks=true,linkcolor=blue!50!black,urlcolor=blue!50!black}
+\setlist{itemsep=2pt,topsep=3pt}
+\title{H41：电子消元块三角预条件在 SolverChallenge26\_01 上的测试}
+\author{温州肯恩大学 \quad Nonlinear Poisson 项目}
+\date{2026 年 11 月 4 日}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+按报告 06 的第 2 条思路，把三温方程组化为“离子 Schur 补 $S_3$ + 辐射 $A_{11}$”两个标量扩散求解，加两次对角运算。
+用精确的内层求解时，外层 FGMRES 只需 3 步到 $10^{-8}$，说明这个块近似几乎是精确的。
+实用版本（每个标量块一次 BoomerAMG V 循环）需要 23 步，与整体 BoomerAMG 相同，但每步更便宜：同一批次中总时间 16.4\,s 对 24.9\,s（0.66 倍）。
+放进 float128 混合精度迭代修正后，3 步达到真实残差 $4.9\times10^{-10}$，用时 34.5\,s，比内层用整体 BoomerAMG 的 44.6\,s 少 23\%。
+诊断表明，瓶颈主要在辐射块 $A_{11}$ 的 V 循环，其次是离子块 $S_3$。下一步应针对这两个标量问题改进。
+\end{abstract}
+
+\section{方法（运行前锁定）}
+方案文件 \texttt{protocol\_bt.md}，哈希 b7186864，2026-11-04T05:23:01Z 锁定，此时代码尚未编写。
+依据报告 06 的测量：$\|A_{21}x_1\|/\|A_{22}x_2\|=9.3\times10^{-13}$，电子块非对角部分只占 $2\times10^{-8}$，$A_{23}=A_{32}$ 为对角阵。
+忽略这两部分后，预条件为
+\begin{align*}
+S_3x_3&=r_3-A_{32}D_{22}^{-1}r_2,\qquad S_3=A_{33}-A_{32}D_{22}^{-1}A_{23},\\
+x_2&=D_{22}^{-1}(r_2-A_{23}x_3),\qquad A_{11}x_1=r_1-A_{12}x_2 .
+\end{align*}
+$S_3$ 保持 7 点对称结构；壳层中 $a_{33}\approx|a_{23}|$，对角元按 $(a_{33}-|a_{23}|)+|a_{23}|(d_{22}-|a_{23}|)/d_{22}$ 计算，避免相减抵消。
+\begin{itemize}
+\item \textbf{bt-v}：$S_3^{-1}$、$A_{11}^{-1}$ 各用一次 BoomerAMG V 循环（与 amg-3d 相同参数），外层 GMRES(50)。
+\item \textbf{bt-ex}：两个标量块用 CG + BoomerAMG 解到 $10^{-10}$，外层 FGMRES(50)。用来衡量块近似本身的质量。
+\end{itemize}
+单元测试（\texttt{test\_bt\_elim.py}）：在结构完全满足假设的小系统上，bt-ex 复原 $z$ 的误差为 $2\times10^{-10}$（即内层容差）；加入 $A_{21}\ne0$ 后误差为 $7\times10^{-6}$，符合预期。
+
+\section{结果}
+判据同 H40（求解器自报残差，你的选择），单线程，依次运行。机器上有其他进程，负载 6--9，计时有噪声：同一个 amg-3d 在 H40 批次用 18.1\,s，本批次用 24.9\,s。
+\begin{table}[H]
+\centering
+\small
+\begin{tabular}{llrrrrrr}
+\toprule
+方法 & 目标 & 迭代 & 真实残差 & 缩放残差 & 设置 (s) & 求解 (s) & 总计 (s) \\
+\midrule
+amg-3d（本批次） & $10^{-4}$ & 15 & 1.3e-2 & 8.2e-9 & 7.4 & 9.4 & 16.8 \\
+ & $10^{-8}$ & 23 & 1.3e-2 & 3.9e-13 & 7.3 & 17.6 & 24.9 \\
+\textbf{bt-v} & $10^{-4}$ & 15 & 1.3e-2 & 1.3e-8 & 6.3 & 6.8 & \textbf{13.1} \\
+ & $10^{-8}$ & 23 & 1.4e-2 & 1.8e-12 & 6.0 & 10.4 & \textbf{16.4} \\
+bt-ex & $10^{-4}$ & 2 & 8.3e-3 & 5.3e-8 & 6.4 & 11.4 & 17.8 \\
+ & $10^{-8}$ & 3 & 8.2e-3 & 5.5e-11 & 6.4 & 16.7 & 23.1 \\
+\bottomrule
+\end{tabular}
+\caption{真实残差约 $10^{-2}$ 是双精度解向量的表示下限（报告 05、06），各方法相同。}
+\end{table}
+
+\begin{table}[H]
+\centering
+\small
+\begin{tabular}{lcccr}
+\toprule
+float128 迭代修正（内层 $10^{-6}$） & 第 1 步 & 第 2 步 & 第 3 步 & 总时间 \\
+\midrule
+内层 GMRES + 整体 BoomerAMG & 19 步，1.3e-2 & 9 步，5.3e-6 & 9 步，\textbf{4.5e-10} & 44.6\,s \\
+内层 GMRES + bt-v & 19 步，1.3e-2 & 9 步，4.0e-6 & 10 步，\textbf{4.9e-10} & \textbf{34.5\,s} \\
+\bottomrule
+\end{tabular}
+\caption{每格为内层迭代数和修正后的真实残差 $\|b-Ax\|/\|b\|$（双双精度计算）。第 2 步已满足 $10^{-4}$，第 3 步满足 $10^{-8}$。时间含 Python 中的双双精度残差计算。}
+\end{table}
+
+\section{预测检验}
+\begin{enumerate}
+\item bt-ex 到 $10^{-8}$ 不超过 3 步：\textbf{成立}（3 步）。块近似几乎精确。
+\item bt-v 两个目标都达到，到 $10^{-8}$ 不超过 15 步：\textbf{不成立}。两个目标都达到了，但用了 23 步，与 amg-3d 相同。
+\item bt-v 在 $10^{-8}$ 的总时间少于同批次 amg-3d：\textbf{成立}（16.4\,s 对 24.9\,s）。即使与 H40 批次中 amg-3d 的最好成绩 18.1\,s 比，也快 9\%。
+\item bt-v 的 $10^{-8}$ 解缩放残差 $<10^{-6}$：\textbf{成立}（$1.8\times10^{-12}$）。
+\item float128 迭代修正 + bt-v 不超过 4 步达到真实 $10^{-8}$，且快于修正 + 整体 AMG：\textbf{成立}（3 步，34.5\,s 对 44.6\,s）。
+\end{enumerate}
+
+\section{诊断：瓶颈在哪个标量块（探索性，未预注册）}
+把其中一个标量块换成精确解（CG + AMG 到 $10^{-10}$），另一个保持一次 V 循环，外层 FGMRES 到 $10^{-8}$：
+\begin{itemize}
+\item $S_3$ 精确、$A_{11}$ 一次 V 循环：外层 \textbf{23} 步，与 bt-v 相同。
+\item $A_{11}$ 精确、$S_3$ 一次 V 循环：外层 \textbf{17} 步。
+\end{itemize}
+所以主要瓶颈是辐射块 $A_{11}$ 的 V 循环质量，其次是离子块 $S_3$（两者都精确时为 3 步）。
+$A_{11}$ 在热核和外部几乎是纯扩散（反应项只占对角元的 $10^{-8}$），只有远端面的弱 Robin 边界，所以近乎奇异；
+$x=0$ 平面上还有约 500 个 $10^{-6}$ 的异常小面系数，会形成被切开的小区域。这些都会产生 V 循环难以消除的光滑误差模式。
+
+\section{结论与下一步}
+\begin{itemize}
+\item 三温方程组可以可靠地化为两个标量扩散问题（bt-ex 3 步），这一步已经比整体 BoomerAMG 快，下一步的工作完全集中在两个标量求解器上。
+\item 结合 float128 迭代修正，这是目前唯一能满足官方真实残差判据的方案，单线程 34.5\,s。
+\end{itemize}
+建议的下一步（需先锁定方案）：
+\begin{enumerate}
+\item \textbf{辐射块 $A_{11}$：}对热核/外部的近零模式做紧缩（指示向量），或者用 FDM 背景逆（$A_{11}$ 在热核与外部都是常系数，正适合 FD-LGF），检查 $x=0$ 面的小系数是否需要单独处理。
+\item \textbf{离子块 $S_3$：}热核孤岛紧缩（报告 06 第 3 条），或壳层局部精确解 + 常系数区 FDM（报告 06 第 4 条）。
+\item 每个标量块用两次 V 循环或 K 循环，比较迭代与时间的折中。
+\item 在比赛机器上做多核实现，并把迭代修正和残差计算写成 C 版本。
+\end{enumerate}
+\end{document}

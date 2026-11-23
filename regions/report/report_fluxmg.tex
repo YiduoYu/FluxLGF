@@ -1,0 +1,142 @@
+\documentclass[11pt,a4paper]{ctexart}
+\usepackage[margin=2.1cm]{geometry}
+\usepackage{amsmath,amssymb,booktabs,float,graphicx,xcolor,hyperref,enumitem}
+\hypersetup{colorlinks=true,linkcolor=blue!50!black,urlcolor=blue!50!black}
+\setlist{itemsep=2pt,topsep=3pt}
+\title{FluxMG：不用 AMG 的通量型结构多重网格（autoresearch 第 1 轮）}
+\author{温州肯恩大学 \quad Nonlinear Poisson 项目}
+\date{2026 年 11 月 6 日}
+
+\begin{document}
+\maketitle
+\sloppy
+
+\begin{abstract}
+目标是做一个不用 AMG、泛化且胜过 BoomerAMG 的求解器。FluxMG 只存面传导系数和对角余量，不存对角元，所以 $10^{17}$ 的元素不会相消；用 $2\times2\times2$ 分片常数层次、K-cycle、每层的区域常数向量，多场矩阵先做自动缩减。全程没有 AMG。
+与调参后的 BoomerAMG（$\theta=0.25$）比较，判据都是双双精度原残差 $10^{-8}$，时间含构建，单线程：
+测试集 19 类赢 17 类、零失败；\textbf{循环中从未使用的留出集 10 个算例全部获胜（0.39--0.93 倍），没有过拟合迹象}；
+\textbf{真实 SC26\_01 上为 0.81--0.87 倍}（起点是 1.92 倍），$m=128$ 的 10 胶囊约 0.74 倍。
+仍然要注意：只支持张量网格 7 点格式，只有串行结果，留出集和测试集来自同样的生成器，bt-fd（Cholesky）在 SC26\_01 上仍然更快，内存只是相当或略低。
+\end{abstract}
+
+\section{方法}
+\paragraph{算子。}每个场每个单元，$(Ax)_{f,i}=\sum_g C_{fg,i}\,x_{g,i}+\sum_{\text{面}} k_f(x_{f,i}-x_{f,\mathrm{nb}})$。$C$ 存行余量和场间局部耦合，由双双精度累加得到。先求差再乘，所以残差和矩阵向量乘都没有相消。
+\paragraph{层次。}粗层面系数是跨盒子边界细面系数之和，$C$ 也是求和，每层仍是 7 点，构建基本只有加法；某方向明显偏弱时不粗化该方向。
+\paragraph{循环。}K-cycle（Notay，两步 GCR），块红黑光滑，只在各向异性的线段上做线消元（只用加法的 GTH 形式）。
+\paragraph{区域向量。}每层把扩散占优的相连单元分成区域，每个区域一个常数向量，并经静态消元延伸到相邻单元；小矩阵 $E=W^TAW$ 按差分精确计算，再用 GTH 消元（Alfa、Xue、Ye 2002）。
+\paragraph{多场缩减。}沿用 AMFR（H50）的规则：可由对角解的场先消去，其余按常数模态的回路增益分组，按块三角顺序求解，每组一个 Core 循环。
+
+\section{循环过程}
+说明书 \texttt{fluxmg/instructions.md} 在启动前经过审核。指标 SCORE 是 $-\text{mean}\log_2(t_\text{FluxMG}/t_\text{AMG})$，失败算作 8 倍。共 29 轮，其中 16 轮是最后的同批参数扫描。主要的保留项：
+
+\begin{table}[H]
+\centering\footnotesize
+\begin{tabular}{p{7.2cm}p{7.6cm}}
+\toprule
+改动 & 效果 \\
+\midrule
+循环启动前：通量形式矩阵向量乘、区域向量、相对强度切分、线光滑与半粗化 & 三温从不收敛到 26--36 步；$A_{33}$ 从 207 到 15 步；各向异性从 116--162 到 13--18 步 \\
+每层都用区域向量（第 2 轮） & 10 扁方块从不收敛到 70 步，失败数归零 \\
+多场自动缩减（第 3 轮） & 真实矩阵 1.92 倍到约 1.3 倍；副作用见第 5 节 \\
+只在需要处做线光滑（第 7、10 轮） & \texttt{insul}、\texttt{perc3} 转为获胜；真实矩阵转为获胜 \\
+修复粗化提前停止（第 12 轮） & \texttt{aniso:64:300} 构建从 43\,s 到 0.32\,s \\
+矩阵解析改为 C（第 13 轮） & 结果逐位不变，SCORE 约提高 0.11 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{规则变动（如实记录）。}最小提升由 0.10 改为 0.04，依据是实测标准差约 0.015；用户决定测试集打平时用真实矩阵决胜（第 10 轮据此保留）；第 12 轮作为修 bug 保留，它没有提高分数。第 11 轮因真实矩阵崩溃（376 步）被丢弃，它的测试集分数并没有下降，说明只看测试集会漏掉这类问题。
+
+\paragraph{判别方法。}多次按直觉提出的原因后来都被证伪（串联反应项、$E$ 的公式、过渡层块解）。真正定位问题的是两个实验：取慢模态看它落在哪里；在某一层换上精确解，看问题在哪一层。比如第 1 层精确解收敛、第 2 层不收敛，直接指向孤岛在粗化时丢失。
+
+\section{结果}
+\begin{table}[H]
+\centering\footnotesize\setlength{\tabcolsep}{4pt}
+\begin{tabular}{llrrrrr}
+\toprule
+类别 & 算例 & 迭代 Flux & 迭代 AMG & Flux (s) & AMG (s) & 比值 \\
+\midrule
+常系数 & \texttt{poisson:64} & 18 & 19 & 0.36 & 0.57 & \textbf{0.63} \\
+各向异性 & \texttt{aniso:64:100} & 13 & 16 & 0.72 & 0.63 & 1.14 \\
+ & \texttt{aniso:64:0.01} & 18 & 17 & 0.44 & 0.61 & \textbf{0.72} \\
+高对比度 & \texttt{lognorm3} & 18 & 19 & 0.40 & 0.60 & \textbf{0.67} \\
+ & \texttt{tubes} & 24 & 20 & 0.49 & 0.70 & \textbf{0.70} \\
+ & \texttt{insul} & 21 & 19 & 0.49 & 0.65 & \textbf{0.75} \\
+ & \texttt{perc3} & 23 & 19 & 0.65 & 0.73 & \textbf{0.89} \\
+三温 & 类 SC26\_01 & 22 & 30 & 1.24 & 2.55 & \textbf{0.49} \\
+ & 强电子传导 & 34 & 30 & 2.03 & 3.22 & \textbf{0.63} \\
+ & 强反馈 & 20 & 28 & 1.30 & 2.98 & \textbf{0.44} \\
+ & 扁方块 & 22 & 30 & 1.19 & 2.70 & \textbf{0.44} \\
+ & 渐变过渡 & 37 & 31 & 1.67 & 2.63 & \textbf{0.63} \\
+ & 3 胶囊 & 29 & 30 & 1.41 & 2.66 & \textbf{0.53} \\
+ & 10 胶囊（两个种子） & 36，36 & 30，29 & 1.66，1.68 & 2.75，2.68 & \textbf{0.60，0.63} \\
+ & 10 渐变扁方块 & 68 & 32 & 2.75 & 2.90 & \textbf{0.95} \\
+多群 & AMG 易（类 U13-2） & 22 & 16 & 0.80 & 0.69 & 1.16 \\
+ & 中（类 U92-1） & 25 & 25 & 0.33 & 0.51 & \textbf{0.65} \\
+ & AMG 难（类 U107-4） & 121 & 109 & 1.82 & 2.47 & \textbf{0.74} \\
+\bottomrule
+\end{tabular}
+\caption{测试集，SCORE 0.559，赢 17/19，零失败。AMG 时间取 3 遍最快，FluxMG 为单遍，这个差别对 BoomerAMG 有利。多群算例是我们自己的结构网格算例，只是类比 Yue 等 2026 的难易，不是他们的矩阵。}
+\end{table}
+
+\begin{table}[H]
+\centering\footnotesize\setlength{\tabcolsep}{4pt}
+\begin{tabular}{lrrrrr}
+\toprule
+留出算例（循环中从未运行） & 迭代 Flux & 迭代 AMG & Flux (s) & AMG (s) & 比值 \\
+\midrule
+3T，5 胶囊，新种子 & 32 & 30 & 1.66 & 2.66 & 0.63 \\
+3T，10 胶囊，新种子 & 55 & 30 & 2.52 & 2.79 & 0.90 \\
+3T，长椭球 & 23 & 30 & 1.37 & 2.82 & 0.49 \\
+3T，八面体，10\% 扰动 & 37 & 30 & 1.69 & 2.57 & 0.65 \\
+3T，新耦合参数 & 23 & 30 & 1.60 & 2.70 & 0.59 \\
+多群，新参数 & 14 & 26 & 0.21 & 0.53 & 0.39 \\
+多群，新参数（AMG 要 286 步） & 289 & 286 & 4.93 & 6.49 & 0.76 \\
+各向异性 1000 & 11 & 18 & 0.61 & 0.66 & 0.93 \\
+3T，3 胶囊，$m=128$ & 34 & 33 & 17.69 & 29.25 & 0.60 \\
+3T，10 胶囊，$m=128$ & 29 & 33 & 15.31 & 27.42 & 0.56 \\
+\bottomrule
+\end{tabular}
+\caption{留出集，SCORE 0.665，赢 10/10，零失败。留出分数高于测试集，没有过拟合迹象。但这些算例来自同样的生成器，只是换了种子和参数，不等于真正独立的问题类别。}
+\end{table}
+
+\begin{table}[H]
+\centering\small
+\begin{tabular}{lrrrrr}
+\toprule
+独立进程，各 3 遍 & 方法 & 迭代 & 时间 (s) & 配对比值 & 进程峰值内存 (GB) \\
+\midrule
+真实 SC26\_01 & FluxMG & 59 & 22.9，24.0，26.0 & 0.81，0.81，0.87 & 5.0--5.9 \\
+ & BoomerAMG & 34 & 28.3，29.8，30.0 & & 5.2--5.4 \\
+10 胶囊，$m=128$ & FluxMG & 41 & 19.8，19.7，19.2 & 0.74，0.73，0.73 & 5.0--5.7 \\
+ & BoomerAMG & 33 & 26.7，27.0，26.4 & & 6.0--6.5 \\
+\bottomrule
+\end{tabular}
+\caption{FluxMG 迭代更多，但每步便宜，构建约 3.5\,s（部分仍是 Python）。内存是整个进程的峰值，含公共的矩阵和 DD 表，以及 FGMRES 比 GMRES 多存的向量。}
+\end{table}
+
+\paragraph{真实矩阵的步数跳动已有解释。}曾观察到小改参数时步数在 38--82 之间跳。逐步检查发现，第 2 步修正后残差一次是 $8.79\times10^{-9}$（停止），一次是 $1.05\times10^{-8}$（多解一步）。这是判据的离散性，不是方法不稳定；也因此曾经看到的 0.66 倍（39 步）不能当作稳定水平。
+
+\section{还没解决的问题}
+\begin{enumerate}
+\item \textbf{通用性。}只支持张量网格上的 7 点 M 矩阵系统。旋转各向异性和非结构网格都不支持，所以 Yue 等的原始矩阵也跑不了。这是离“绝大部分方程”最大的距离。
+\item \textbf{并行未测。}全部单线程。红黑光滑和结构化存储应当有利于并行，但这只是预期。
+\item \textbf{SC26\_01 上 bt-fd 仍然更快}：Cholesky 版 16.8\,s（H57），FluxMG 约 24\,s。两者可以按特征区大小选择，但选择规则还没有验证。
+\item \textbf{多群上的缩减选错。}AMFR 把本该一起解的场拆开：一个算例从 23 步变成 121 步，留出集里一个算例从 36 步变成 289 步（整体解 0.22 倍，现在 0.76 倍）。靠实测收敛因子选择能选对，但目前成本太高（第 6 轮）。
+\item \textbf{仍然输的两类}：\texttt{aniso:64:100}（1.14 倍）、多群易例（1.16 倍）。
+\item \textbf{内存}只是相当或略低，不是之前说的明显更低。主要占用来自公共数据和 FGMRES 向量，FluxMG 自身的层次是否更省还没有单独量。
+\item \textbf{比较对象}只调了 $\theta$。BoomerAMG 的光滑器等其他参数没有扫描，不能说已经胜过它的最优配置。
+\item \textbf{计时条件}：机器上开着 Word、微信等，同一代码的 SCORE 在 0.43--0.56 之间波动，所以应看同批比较。逐算例比值也有这部分噪声。
+\item 构建还有一部分是 Python；真实矩阵只有一个时间步，序列复用尚未测试。
+\end{enumerate}
+
+\section{下一步}
+\begin{enumerate}
+\item 并行测试（需要多核机器），这是判断它是否真正胜过 BoomerAMG 的关键。
+\item 低成本修复多群缩减的选择。
+\item 补测：BoomerAMG 的更多参数，网格加密（$m=256$）内存和时间，时间序列复用。
+\item 决定是否做不依赖结构网格的代数版本：通量表示可以用到代数聚合上，但那严格说也算一种 AMG。
+\end{enumerate}
+
+\paragraph{文件。}\sloppy\texttt{FD\_LGF/fluxmg/}：\texttt{flux\_mg.py}、\texttt{kernel.c}、\texttt{eval\_fluxmg.py}、\texttt{instructions.md}、\texttt{autoresearch.jsonl}、\texttt{autoresearch\_dashboard.md}、\texttt{final\_suite.txt}、\texttt{final\_holdout.txt}。
+\end{document}

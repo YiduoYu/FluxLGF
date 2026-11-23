@@ -1,0 +1,257 @@
+\documentclass[11pt,a4paper]{ctexart}
+\usepackage[margin=2.2cm]{geometry}
+\usepackage{amsmath,amssymb,booktabs,longtable,graphicx,float,xcolor,adjustbox,hyperref}
+\usepackage[section]{placeins}
+\hypersetup{colorlinks=true,linkcolor=blue!50!black,citecolor=blue!50!black,urlcolor=blue!50!black}
+\setlength{\LTcapwidth}{\textwidth}
+\newcommand{\Mtwo}{方法二}
+\title{方法二（FD-LGF[FDM 背景]）与传统 LGF、GMG、BoomerAMG 的\\二维和三维对比}
+\author{温州肯恩大学 \quad Nonlinear Poisson 项目}
+\date{2026 年 11 月 3 日}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+对 $-\nabla\!\cdot(a\nabla u)+qu=f$ 的通量格式离散，比较四种 PCG 预条件：传统 LGF（常系数格点 Green 函数）、几何多重网格 GMG、
+hypre BoomerAMG，以及\Mtwo{}——分层背景 $a_1(x)$ 的精确快速逆加夹杂附近的精确局部 LU，按平衡形式组合。
+二维取 $n=127$–$1023$（最多 $10^6$ 个未知量），三维取 $n=31$–$127$（最多 $2\times10^6$ 个未知量），对比度
+$\chi=10^2$–$10^8$，四类系数。统计迭代次数、精度（代数误差、相对连续解的总误差、逐步误差曲线）和时间（setup、solve、
+达到误差 $10^{-8}$ 的时间）。
+\textbf{主要结论：}(1) 在教授的 $a=\chi^x$ 和阶跃分层上，\Mtwo{} 在二维、三维都只需 1--3 次迭代，与 $\chi$、$n$ 无关，
+最大网格上的总时间二维不到 BoomerAMG 的 0.3 倍，三维不到 0.06 倍；传统 LGF 在 $\chi\ge10^4$ 时不收敛。
+(2) 有夹杂时，\Mtwo{} 的迭代数仍与 $\chi$、$n$ 无关（二维 7--10 次，三维 10--13 次），时间则取决于夹杂区稀疏 LU 的规模：
+二维 $n=1023$ 时比 BoomerAMG 慢 1.4--3.4 倍；三维 $n=127$ 时，规则夹杂上两者持平（0.92--1.03 倍），
+随机夹杂上\Mtwo{} 快约 2 倍（0.48--0.52 倍）。三维 BoomerAMG 的迭代数随 $n$ 增长（11$\to$17），\Mtwo{} 不增长。
+(3) 所有收敛方法的离散误差相同；按残差停止时，\Mtwo{} 在低系数区的代数误差比 BoomerAMG 大 1--4 个数量级，
+需要更紧的容差或按误差计数。
+\end{abstract}
+
+\tableofcontents
+
+\section{问题与离散}
+在 $\Omega=(0,1)^d$（$d=2,3$）上求解
+\[
+  -\nabla\cdot\big(a(\mathbf x)\nabla u\big)+q(\mathbf x)\,u=f,\qquad u|_{\partial\Omega}=0 .
+\]
+网格 $h=1/(n+1)$，每个方向 $n$ 个内点。采用守恒的 $2d+1$ 点通量格式，面系数取两端节点的算术平均
+$a_{i+1/2}=\tfrac12(a_i+a_{i+1})$（与 Xia 论文式 (5)--(6) 相同；三维同样按三个方向写出），得到对称正定系统 $Au=f$。
+所有方法共用同一个 PCG 循环（\texttt{axy\_lgf.solvers.\_pcg} 及其三维复制）：
+停止规则为 $\|r_k\|/\|f\|\le10^{-10}$（收敛时重算真实残差），二维 maxiter $=1000$，三维 $500$。
+计时为单线程（\texttt{OMP\_NUM\_THREADS=1}），同一台 8 核 Mac，取 3 次中位数（单次 $>5$ s 时只跑 1 次）。
+
+\section{四种方法}
+\subsection{传统 LGF}
+按 Xia 论文 §4.1 式 (14)--(15)：$\bar a=\mathrm{mean}(a)$，$\lambda=\mathrm{mean}(\max(\sigma_h+q_u,0))$。
+本文的问题是线性的（$a$ 不依赖 $u$，$\sigma_h=0$，$q_u=q$），所以 $\lambda=\mathrm{mean}(q)$。预条件为
+\[
+  M_{\mathrm{LGF}}^{-1}=\big(\bar a(-\Delta_h)+\lambda I\big)^{-1},
+\]
+在方形区域上用 $d$ 维 DST-I 精确作用（论文中 BAE 处理不规则边界；在方形区域上边界与辅助盒子重合，BAE 部分退化为恒等）。
+论文的 Jacobian 非对称，外层用 FGMRES；本文矩阵对称正定，外层用 PCG。数值检查：常系数时与真逆的相对误差 $10^{-14}$。
+
+\subsection{GMG}
+双线性（三维为三线性）插值 $P$，限制 $P^{\mathsf T}$，Galerkin 粗算子 $P^{\mathsf T}AP$，V(2,2) 阻尼 Jacobi，
+最粗层（$3^d$ 个点）Cholesky 直接解。阻尼取 $\omega_\ell=c/\max_i\sum_j|D^{-1}A|_{ij}$，
+二维 $c=1.6$、三维 $c=12/7$，在 Laplace 上正好是教科书的最优值 $4/5$（二维）、$6/7$（三维）
+（Briggs--Henson--McCormick 2000；Trottenberg 等 2001）。由 Gershgorin，$\omega_\ell\lambda_{\max}(D^{-1}A)\le c<2$，
+所以光滑子收敛、V-cycle 对称正定（数值检查对称到 $10^{-18}$）。
+\emph{说明：}项目原 GMG 取 $c=1$（Laplace 上 $\omega=1/2$），二维 Poisson 上 V(2,2) 收敛因子 0.30，而 $\omega=4/5$ 约为 0.13；
+经确认后改为教科书值并重跑了二维 GMG 的全部 64 组（旧结果保存在 \texttt{results/benchmark\_gmg\_omega05.csv}）。
+
+\subsection{BoomerAMG}
+hypre BoomerAMG（Henson \& Yang 2002）经 petsc4py 调用，每次作用一个 V-cycle。参数：Falgout 粗化，classical 插值，
+symmetric-SOR/Jacobi 光滑（hypre 文档要求作 CG 预条件时用对称光滑子），粗网格 Gaussian elimination，
+强连接阈值二维 0.25、三维 0.5（hypre 对二维、三维的推荐值）。数值检查：对称到 $10^{-17}$，二维 Poisson 上每个 V-cycle 收敛因子 0.078。
+
+\subsection{\Mtwo{}：FD-LGF[FDM 背景]}
+把系数写成 $a=b\cdot\phi$，其中 $b=a_1(x)$ 是分层背景（本文所有算例的背景只沿 $x$ 变化，含 $\chi^x$ 和阶跃），
+$\phi$ 只在夹杂内不等于 1。
+\begin{itemize}
+\item \textbf{背景逆 $G$}：用系数 $b$ 组装的通量算子 $B$ 可以精确快速求逆：在 $y$（三维为 $y,z$）方向做 DST-I，
+  每个横向模态在 $x$ 方向解一个三对角方程，复杂度 $O(n^d\log n)$。$q$ 用其横向平均代替，是 $G$ 中唯一的近似。
+  对一般可分离 $a_1(x)a_2(y)$ 用快速对角化（Lynch--Rice--Thomas 1964）。
+\item \textbf{局部解 $Q$}：特征集 $\{|\log a-\log b|>\log 2\}$ 向外膨胀宽度 $w$ 的一圈，对每个连通区域取 $A$ 的子块做稀疏 LU，
+  $Q=\sum_k R_k^{\mathsf T}A_k^{-1}R_k$。
+\item \textbf{平衡组合}：
+  \[ P=Q+(I-QA)\,G\,(I-AQ). \]
+  $G$、$A_k$ 对称正定，所以 $P$ 对称正定；没有夹杂时 $P=G$。
+\end{itemize}
+环宽：二维 $w=1/16$（主设置，与 H30 相同）及 $1/32$、$1/64$；三维 $w=1/32$、$1/64$（$w=1/16$ 时 27 个球连成一片，
+$n=127$ 的三维 LU 不可行）。
+
+\section{算例与指标}
+\begin{itemize}
+\item[A] $a=\chi^x$（教授指定的对比度算例），$u=\prod\sin(\pi x_i)$，$q=1+0.2\prod\cos(2\pi x_i)$，$f$ 由连续解析式给出，
+  因此可以计算相对 PDE 解的总误差。$u_h$ 二维用稀疏直接法，三维用\Mtwo{}-PCG 迭代到舍入误差（与稀疏直接法相比：$n=31$ 时差 $2\times10^{-15}$，$n=63$ 时差 $2\times10^{-14}$）。
+\item[B] 阶跃层 $a=\chi^{H(x-1/2)}$，离散 MMS（$f=A_hu^*$，$u_h=u^*$）。
+\item[C] $\chi^x$ 乘规则夹杂（二维 9 个圆、三维 27 个球，$r=0.08$，系数再乘 $10^4$），离散 MMS。
+\item[D] $\chi^x$ 乘随机夹杂（二维 20 个圆、三维 30 个球，系数乘 $10^4$ 或 $10^{-4}$，即导体和绝缘体都有），离散 MMS。
+\end{itemize}
+指标：迭代次数；按残差规则停止时的代数误差 $\|u-u_h\|/\|u_h\|$；相对连续解的总误差（A）；
+同一 PCG 递推逐步记录的误差曲线，由此得到第 5 步误差、误差降到 $10^{-8}$ 所需迭代 $k_8$、
+以及“达到误差 $10^{-8}$ 的时间”$=$ setup $+k_8\times$单步时间；setup、solve 和总时间。
+实验方案和预测在运行前锁定（SHA-256：二维 \texttt{38eab086}，三维 \texttt{06cc1590}）。
+
+\section{二维结果}
+\input{tables_2d.tex}
+
+\begin{figure}[H]\centering
+\includegraphics[width=\textwidth]{fig2d_iters_vs_n.png}
+\caption{二维：$\chi=10^8$ 时迭代次数随 $n$ 的变化。}\label{fig:2dits}
+\end{figure}
+\begin{figure}[H]\centering
+\includegraphics[width=\textwidth]{fig2d_error_traces.png}
+\caption{二维：$n=1023$、$\chi=10^8$ 时误差 $\|u_k-u_h\|/\|u_h\|$ 随迭代的下降（前 60 步）。}\label{fig:2dtrace}
+\end{figure}
+\begin{figure}[H]\centering
+\includegraphics[width=\textwidth]{fig2d_time_to_1e-8_vs_n.png}
+\caption{二维：达到误差 $10^{-8}$ 的时间（setup $+k_8\times$单步时间，$\chi=10^8$）。}\label{fig:2dtime}
+\end{figure}
+
+\subsection{二维分析}
+\paragraph{迭代次数。}在 A、B 上，\Mtwo{} 只需 1--3 次迭代，与 $\chi$、$n$ 无关，因为背景逆 $G$ 对分层系数是精确的，
+剩下的只有 $q$ 的横向变化；GMG 7--8 次，BoomerAMG 7--9 次；传统 LGF 在 A 上 $\chi=10^2$ 时已要 110--127 次，
+$\chi\ge10^4$（$n=1023$）或 $\chi\ge10^6$ 时 1000 次内不收敛，在 B 上能收敛但要 15--58 次。
+在 C、D 上，\Mtwo{}（$w=1/16$）7--10 次，BoomerAMG 8--11 次，基本相同；GMG 48--114 次，且随 $n$ 增长；传统 LGF 全部不收敛。
+\Mtwo{} 的迭代数从 $n=127$ 到 $1023$ 最多变化 2 次，与网格无关。
+
+\paragraph{精度。}A 上所有收敛方法的总误差前 3 位有效数字完全相同（如 $n=1023$、$\chi=10^8$ 时都是 $4.7\times10^{-5}$），
+说明误差由离散决定；传统 LGF 在 $\chi\ge10^6$ 时没收敛，总误差比其他方法大 1.1--950 倍（网格越细、$\chi$ 越大差距越大），
+见表~\ref{tab:aerr二维}。
+按残差规则停止时，\Mtwo{} 的代数误差（C、D 上 $10^{-8}$--$7\times10^{-6}$，B 上 $\chi=10^8$ 时 $3.8\times10^{-4}$）
+比 BoomerAMG（$10^{-10}$ 量级）大得多：\Mtwo{} 的残差在高系数区很快变小，而低系数区的误差在残差里几乎看不到（H20 已发现）。
+按误差计数（表~\ref{tab:k82d}），把误差降到 $10^{-8}$ 时，\Mtwo{} 在 A、B 上要 2--3 次（BoomerAMG 5--6 次），
+在 C、D 上要 9--11 次（BoomerAMG 7--11 次）。图~\ref{fig:2dtrace} 显示，有夹杂时 BoomerAMG 每步的误差下降比\Mtwo{} 略快。
+
+\paragraph{时间。}A、B：\Mtwo{} setup 只是一次三对角分解，$n=1023$ 时总时间 0.2--0.36 s，BoomerAMG 1.1--1.4 s，
+GMG 0.86--1.0 s，传统 LGF 1--49 s；\Mtwo{} 是 BoomerAMG 的 $\le$0.29 倍、GMG 的 $\le$0.41 倍。
+C、D：\Mtwo{} 的成本由夹杂区 LU 决定。$w=1/16$ 时扩张后的 9 个圆连成一片，占网格的 48\%（D 为 57\%），
+$n=1023$ 时 LU setup 3.2--3.5 s，总时间 4.7--5.3 s，是 BoomerAMG（1.5--1.6 s）的 3.1--3.4 倍；
+$w=1/64$ 时 2.3--2.8 s，仍是 1.4--1.8 倍。$n\le255$ 时两者相当。GMG 6.9--11.7 s，传统 LGF 约 40 s 且不收敛。
+
+\paragraph{预测检验（二维，锁定方案 \texttt{38eab086}）。}
+\begin{enumerate}
+\item A、B：\Mtwo{} $\le3$ 次；BoomerAMG、GMG 6--12 次；LGF 在 A 上 $\chi\ge10^6$ 不收敛——\textbf{成立}。
+\item A：收敛方法总误差 3 位相同——\textbf{成立}；LGF 在 $\chi\ge10^6$ 时误差大 $\ge10$ 倍——\textbf{部分成立}
+  （$n\ge511$ 成立；$n=127$、$\chi=10^6$ 只大 1.14 倍，$n=255$、$\chi=10^6$ 大 3.7 倍）。
+\item C、D：\Mtwo{} $\le11$ 次且随 $n$ 变化 $\le2$；BoomerAMG $\le12$ 次；GMG $\ge40$；LGF 不收敛——\textbf{成立}。
+\item A、B，$n\ge511$：\Mtwo{} 总时间 $\le$ BoomerAMG 的 1/3——\textbf{成立}（$\le0.29$）；$\le$ GMG 的 1/3——\textbf{不成立}
+  （最大 0.41，GMG 改用 $\omega=4/5$ 后更快；该预测是针对原 GMG 写的）。
+\item C、D，$n=1023$：\Mtwo{}($w=1/16$) 慢于 BoomerAMG——\textbf{成立}（3.1--3.4 倍）；最快的环宽在 1.5 倍以内——\textbf{不成立}（1.44--1.82 倍）。
+\item C、D：\Mtwo{} 停止时代数误差大于 BoomerAMG——\textbf{成立}（64/64）；$k_8\le14$——\textbf{成立}（最大 11）。
+\end{enumerate}
+
+\section{三维结果}
+\IfFileExists{tables_3d.tex}{\input{tables_3d.tex}}{}
+
+\begin{figure}[H]\centering
+\includegraphics[width=\textwidth]{fig3d_iters_vs_n.png}
+\caption{三维：$\chi=10^8$ 时迭代次数随 $n$ 的变化。}\label{fig:3dits}
+\end{figure}
+\begin{figure}[H]\centering
+\includegraphics[width=\textwidth]{fig3d_error_traces.png}
+\caption{三维：$n=127$、$\chi=10^8$ 时误差随迭代的下降。}\label{fig:3dtrace}
+\end{figure}
+\begin{figure}[H]\centering
+\includegraphics[width=\textwidth]{fig3d_time_to_1e-8_vs_n.png}
+\caption{三维：达到误差 $10^{-8}$ 的时间（$\chi=10^8$）。}\label{fig:3dtime}
+\end{figure}
+
+\subsection{三维分析}
+\paragraph{迭代次数。}A、B 上\Mtwo{} 仍是 1--3 次。BoomerAMG 在三维随 $n$ 略增（A 5--9 次，B 7--11 次），
+GMG（$\omega=6/7$）稳定在 8--9 次；传统 LGF 在 A 上 $\chi=10^2$ 要 68--111 次，$\chi\ge10^4$（$n\ge63$）时 500 次内不收敛，
+在 B 上 19--62 次。C、D 上\Mtwo{}（$w=1/32$）10--13 次，$n=127$ 时只要 10--11 次；$w=1/64$ 要 12--17 次；
+BoomerAMG 从 $n=31$ 的 11--14 次增加到 $n=127$ 的 14--17 次；GMG 57--135 次且随 $n$ 增长；传统 LGF 全部不收敛。
+
+\paragraph{精度。}A 上所有收敛方法总误差前 3 位相同（$n=127$、$\chi=10^8$：$2.53\times10^{-3}$；三维网格较粗，离散误差比二维大）；
+传统 LGF 在 $\chi\ge10^6$ 时没收敛，误差最多大 34 倍。按残差停止时，\Mtwo{} 在 C、D 上的代数误差为 $1.4\times10^{-9}$--$4.5\times10^{-7}$，
+BoomerAMG 为 $1.8\times10^{-10}$--$1.5\times10^{-8}$（48 组中 46 组\Mtwo{} 更大）；B 上 $\chi=10^8$ 时\Mtwo{} 只迭代 1 次，误差 $2\times10^{-4}$，
+与二维相同的停止规则问题。按误差计数，把误差降到 $10^{-8}$：\Mtwo{}（$w=1/32$）10--15 次，BoomerAMG 10--16 次，GMG 64--129 次。
+图~\ref{fig:3dtrace} 中，$w=1/32$ 的误差曲线下降最快，BoomerAMG 次之。
+
+\paragraph{时间（$n=127$，约 $2\times10^6$ 个未知量）。}A、B：\Mtwo{} 0.23--0.47 s，BoomerAMG 7.1--13.5 s（其中 setup 3.4--6.2 s），
+GMG 2.2--2.9 s，传统 LGF 1.9--48 s；\Mtwo{} 是 BoomerAMG 的 $\le0.055$ 倍、GMG 的 0.10--0.21 倍。
+三维时 GMG 比 BoomerAMG 快 3--6 倍（BoomerAMG 在三维的 setup 和算子复杂度更高）。
+C、D：三维的夹杂是彼此分开的小球，膨胀后 LU 区域只占网格的 6--15\%（二维 $w=1/16$ 时为 48--57\%），分成 23--29 个小区域分别分解。
+$w=1/64$ 时 C 上 9.2--9.9 s，与 BoomerAMG（9.3--10.1 s）持平；D 上 5.5--6.0 s，BoomerAMG 11.0--11.7 s，快约 2 倍。
+$w=1/32$ 迭代更少，但三维 LU 的填充增长很快（C 上 setup 从 $n=63$ 的 0.24 s 增加到 $n=127$ 的 17 s），总时间 20--21 s（C）、9.2--9.8 s（D）。
+GMG 13.5--21 s，传统 LGF 42--47 s 且不收敛。
+
+\paragraph{预测检验（三维，锁定方案 \texttt{06cc1590}）。}
+\begin{enumerate}
+\item A、B：\Mtwo{} $\le3$ 次；BoomerAMG、GMG $\le15$ 次；LGF 在 A 上 $\chi\ge10^6$ 不收敛——\textbf{成立}。
+\item C、D：\Mtwo{}($w=1/32$) $\le15$ 次且从 $n=31$ 到 127 变化 $\le3$；$n=127$ 时 BoomerAMG 迭代多于\Mtwo{}；GMG $\ge50$——\textbf{成立}。
+\item $n=127$ 时间：A、B 上\Mtwo{} $\le$ BoomerAMG 的 1/3——\textbf{成立}（$\le0.055$）；C、D 上最快环宽在 BoomerAMG 的 1.3 倍以内——\textbf{成立}；
+  “不分胜负”——C 上成立（0.92--1.03），D 上\textbf{不成立}（\Mtwo{} 快约 2 倍）；$w=1/32$ 慢于 $w=1/64$——\textbf{成立}。
+\item A：收敛方法总误差 3 位相同——\textbf{成立}。
+\item C、D：\Mtwo{} 停止时代数误差大于 BoomerAMG——\textbf{基本成立}（$w=1/32$ 46/48，$w=1/64$ 48/48）；$k_8\le18$——\textbf{成立}（最大 15）。
+\end{enumerate}
+锁定前的冒烟测试已看到 $n=63$ 与 $n=127$（仅 C、$\chi=10^6$）的部分结果，见方案文件；因此第 3 条的时间预测不是完全盲测。
+
+\section{与其他方法的区别（文献对比）}
+详细内容见 \texttt{FD\_LGF/literature.md}。下面按类别概括；多数文献只读了摘要或二手引用。
+\begin{itemize}
+\item \textbf{传统 LGF / FFT 参考介质}（Xia；Moulinec--Suquet 1998；Zeman 等 2010）：用一个常系数算子的快速逆，
+  迭代数随对比度增长（CG 加速后约 $\sqrt\chi$）。\Mtwo{} 把对比度放进两个精确部件：分层部分在 $G$ 里、夹杂在 $Q$ 里。
+\item \textbf{可分离 / 快速对角化预条件}（Concus--Golub 1973；Lynch--Rice--Thomas 1964；Huynh--Ito--Toivanen）：
+  只对 $a_1(x)a_2(y)$ 精确；\Mtwo{} 在此基础上加入夹杂附近的精确局部修正。
+\item \textbf{电容矩阵法}（Buzbee 等 1971；Proskurowski--Widlund 1976）与 \textbf{fat boundary method}（Maury 2001）：
+  全区域快速解法 $+$ 孔洞或边界附近的小问题。后者结构上最接近\Mtwo{}，区别是：它处理孔洞（局部问题加 Dirichlet 条件），
+  用带松弛参数 $\theta$ 的不动点迭代耦合；\Mtwo{} 处理有限系数、可高可低的夹杂，纯代数（直接取 $A$ 的子块），
+  是对称正定预条件，放在 CG 中，无需调参，且全局快速解法针对变系数分层背景。
+\item \textbf{两层区域分解 / BNN / deflation / GenEO}（Mandel 1993；Tang 等 2009；Graham--Lechner--Scheichl 2007；Spillane 等 2014）：
+  代数形式相同，但其中 $Q$ 是低维粗空间，必须随系数构造才能对高对比度稳健；\Mtwo{} 中 $Q$ 是局部精确解，
+  $G$ 是全局、全尺度的精确背景逆，不需要粗空间。用 Xu (1992) 的子空间校正语言，\Mtwo{} 是两个子空间的对称逐次校正。
+\item \textbf{AGKS}（Aksoylu--Graham--Klie--Scheichl 2008）：按高/低系数分块；\Mtwo{} 按“背景/特征”分块，背景自身可以有 $10^8$ 的对比度。
+\item \textbf{GMG / BoomerAMG}（Alcouffe 等 1981；Henson--Yang 2002）：GMG 的几何插值在系数跳跃处退化（本文 C、D 上二维 48--114 次、三维 57--135 次）；
+  BoomerAMG 是黑箱，自动适应系数并可并行。\Mtwo{} 是“灰箱”：需要笛卡尔网格、可分离背景和可识别的夹杂。
+\end{itemize}
+
+\section{结论与局限}
+\begin{enumerate}
+\item \textbf{教授的 $a=\chi^x$ 和分层系数：\Mtwo{} 最好。}二维、三维都只需 1--3 次迭代，与 $\chi\le10^8$、$n$ 都无关；
+  setup 只是一次三对角分解；时间比 BoomerAMG 少一个数量级以上（三维），比教科书参数的 GMG 少 2.4--10 倍。
+  这时\Mtwo{} 就是方法一（精确的分层 LGF），因为没有夹杂。
+\item \textbf{分层背景加夹杂：迭代数稳健，时间看 LU 规模。}\Mtwo{} 的迭代数与 $\chi$、$n$ 无关，而 BoomerAMG 在三维随 $n$ 增长、
+  GMG 随 $n$ 明显增长。二维时夹杂区（含环）占网格一半，LU 太贵，\Mtwo{} 比 BoomerAMG 慢 1.4--3.4 倍；
+  三维时夹杂区只占 6--15\%，\Mtwo{} 与 BoomerAMG 持平或快约 2 倍。窄环（$w=1/64$）通常更省时间。
+\item \textbf{精度：}收敛时所有方法的离散误差相同，差别只在代数误差。残差停止规则会低估\Mtwo{} 在低系数区的误差，
+  高对比度下应按误差（或预条件残差）停止，或把容差收紧到 $10^{-13}$。
+\item \textbf{传统 LGF}（常系数参考）在 $\chi\ge10^4$ 时基本不可用，这正是\Mtwo{} 要解决的问题。
+\end{enumerate}
+\paragraph{局限。}(i) \Mtwo{} 需要结构信息：笛卡尔网格、可分离的背景、可识别的夹杂；背景不可分离时需要先拟合。
+(ii) 局部解用稀疏直接 LU，夹杂体积大或网格更细时 setup 超线性增长（三维 $w=1/32$ 已明显）；不精确的局部解会破坏收敛（H9）。
+(iii) 本文全部是单线程 Python 实现，BoomerAMG 有成熟的 MPI 并行版本，\Mtwo{} 还没有。
+(iv) 计时时机器上有其他程序（load 2--12），迭代次数和误差是主要指标，时间只作相对比较。
+
+\appendix
+\section{完整结果表}
+\input{appendix_2d.tex}
+\IfFileExists{appendix_3d.tex}{\input{appendix_3d.tex}}{}
+
+\section{复现}
+代码在 \texttt{Nonlinear Poisson/FD\_LGF/}：\texttt{fdlgf\_m2.py}（\Mtwo{}）、\texttt{baselines/}（LGF、GMG、BoomerAMG）、
+\texttt{benchmark.py}（二维）、\texttt{three\_d/}（三维全部代码）、\texttt{report/make\_tex.py}（本报告的表格）。
+BoomerAMG 需要 \texttt{/opt/anaconda3/envs/hypre\_env}；测试：\texttt{test\_method2.py}、\texttt{test\_baselines.py}、\texttt{three\_d/test\_3d.py}。
+
+\begin{thebibliography}{99}\small
+\bibitem{xia} Q.~Xia, Unfitted boundary-algebraic preconditioning for exact-Jacobian Newton--Krylov solution of quasilinear elliptic problems in complex geometry, preprint (main.pdf).
+\bibitem{alcouffe} R.~E.~Alcouffe, A.~Brandt, J.~E.~Dendy, J.~W.~Painter, The multi-grid method for the diffusion equation with strongly discontinuous coefficients, SIAM J. Sci. Stat. Comput. 2 (1981) 430--454.
+\bibitem{agks} B.~Aksoylu, I.~G.~Graham, H.~Klie, R.~Scheichl, Towards a rigorously justified algebraic preconditioner for high-contrast diffusion problems, Comput. Visual. Sci. 11 (2008) 319--331.
+\bibitem{briggs} W.~L.~Briggs, V.~E.~Henson, S.~F.~McCormick, A Multigrid Tutorial, 2nd ed., SIAM, 2000.
+\bibitem{buzbee} B.~L.~Buzbee, F.~W.~Dorr, J.~A.~George, G.~H.~Golub, The direct solution of the discrete Poisson equation on irregular regions, SIAM J. Numer. Anal. 8 (1971) 722--736.
+\bibitem{concus} P.~Concus, G.~H.~Golub, Use of fast direct methods for the efficient numerical solution of nonseparable elliptic equations, SIAM J. Numer. Anal. 10 (1973) 1103--1120.
+\bibitem{gls} I.~G.~Graham, P.~O.~Lechner, R.~Scheichl, Domain decomposition for multiscale PDEs, Numer. Math. 106 (2007) 589--626.
+\bibitem{henson} V.~E.~Henson, U.~M.~Yang, BoomerAMG: a parallel algebraic multigrid solver and preconditioner, Appl. Numer. Math. 41 (2002) 155--177.
+\bibitem{lrt} R.~E.~Lynch, J.~R.~Rice, D.~H.~Thomas, Direct solution of partial difference equations by tensor product methods, Numer. Math. 6 (1964) 185--199.
+\bibitem{mandel} J.~Mandel, Balancing domain decomposition, Comm. Numer. Methods Eng. 9 (1993) 233--241.
+\bibitem{maury} B.~Maury, A fat boundary method for the Poisson problem in a domain with holes, J. Sci. Comput. 16 (2001) 319--339.
+\bibitem{ms} H.~Moulinec, P.~Suquet, A numerical method for computing the overall response of nonlinear composites with complex microstructure, Comput. Methods Appl. Mech. Eng. 157 (1998) 69--94.
+\bibitem{pw} W.~Proskurowski, O.~Widlund, On the numerical solution of Helmholtz's equation by the capacitance matrix method, Math. Comp. 30 (1976) 433--468.
+\bibitem{tang} J.~M.~Tang, R.~Nabben, C.~Vuik, Y.~A.~Erlangga, Comparison of two-level preconditioners derived from deflation, domain decomposition and multigrid methods, J. Sci. Comput. 39 (2009) 340--370.
+\bibitem{trottenberg} U.~Trottenberg, C.~W.~Oosterlee, A.~Sch\"uller, Multigrid, Academic Press, 2001.
+\bibitem{xu} J.~Xu, Iterative methods by space decomposition and subspace correction, SIAM Rev. 34 (1992) 581--613.
+\bibitem{zeman} J.~Zeman, J.~Vond\v{r}ejc, J.~Nov\'ak, I.~Marek, Accelerating a FFT-based solver for numerical homogenization of periodic media by conjugate gradients, J. Comput. Phys. 229 (2010) 8065--8071.
+\end{thebibliography}
+\end{document}
